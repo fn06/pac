@@ -1,0 +1,8 @@
+(menhir
+ (modules parser))
+
+(ocamllex lexer)
+
+(library
+ (modules parser lexer ast)
+ (name pac))
