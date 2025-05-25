@@ -4,5 +4,5 @@
 (ocamllex lexer)
 
 (library
- (modules parser lexer ast)
+ ; (modules parser lexer ast)
  (name pac))
