@@ -16,15 +16,26 @@ end
 let convert_dependency (pkg, targets) : Core.dependencies =
   List.map (fun t -> (pkg, t)) targets
 
-let of_ast_expression (deps : Ast.expression) : Core.dependencies =
-  List.flatten @@ List.map convert_dependency deps
+let of_ast_expression (deps : Ast.hexpr) : Core.dependencies =
+  let rec encode v acc =
+    match v with
+    | Ast.Conflict dep -> convert_dependency dep @ acc
+    | Ast.Dependency dep -> convert_dependency dep @ acc
+    | [] | _ :: _ -> Ast.fold ~f:encode acc deps
+  in
+  encode deps []
 
 let to_ast_dependency ((pkg, (name, versions)) : Core.dependency) :
     Ast.dependency =
   (pkg, [ (name, versions) ])
 
-let to_ast_expression (deps : Core.dependencies) : Ast.expression =
-  List.map to_ast_dependency deps
+let to_ast_expression (deps : Core.dependencies) : Ast.cexpr =
+  let open Ast in
+  List.fold_left
+    (fun acc dep ->
+      let v = to_ast_dependency dep in
+      Ast.dependency v :: acc)
+    [] deps
 
 module StringMap = Map.Make (String)
 module StringSet = Set.Make (String)

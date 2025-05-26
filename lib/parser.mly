@@ -2,7 +2,7 @@
 %token LPAREN RPAREN
 %token EOF
 
-%start <Ast.expression> expression
+%start <Ast.hexpr> expression
 %%
 
 expression:
@@ -10,10 +10,10 @@ expression:
 
 dependencies:
   | { [  ] }
-  | d = dependency; ds = dependencies { d :: ds }
+  | d = dependency; ds = dependencies { Ast.(d :: ds) }
 
 dependency:
-  | p = package; LPAREN; ts = targets; RPAREN { (p, ts) }
+  | p = package; LPAREN; ts = targets; RPAREN { Ast.Dependency (p, ts) }
 
 target:
   | n = WORD; LPAREN; vs = versions; RPAREN   { (n, vs) }

@@ -25,7 +25,7 @@ let parse_package str =
 
 let parse_cmd filename =
   let deps = process_file filename in
-  Ast.pp Format.std_formatter deps
+  Ast.pp_expression Format.std_formatter deps
 
 let major_version v = List.hd (String.split_on_char '.' v)
 
@@ -96,9 +96,9 @@ let reduce_cmd filename granularity from_calculus to_calculus () =
   | "concurrent", "core" ->
       let reduced = Concurrent.encode_dependencies g deps in
       let ast_reduced = to_ast_expression reduced in
-      Ast.pp Format.std_formatter ast_reduced
-  | "core", "concurrent" -> Ast.pp Format.std_formatter ast_deps
-  | src, dst when src = dst -> Ast.pp Format.std_formatter ast_deps
+      Ast.pp_cexpr Format.std_formatter ast_reduced
+  | "core", "concurrent" -> Ast.pp_expression Format.std_formatter ast_deps
+  | src, dst when src = dst -> Ast.pp_expression Format.std_formatter ast_deps
   | src, dst ->
       failwith (Printf.sprintf "Unsupported reduction: %s to %s" src dst)
 
