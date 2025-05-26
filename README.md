@@ -1,2 +1,4 @@
-pac
+Pac
 ===
+
+The Package Calculus

@@ -20,7 +20,7 @@
  (name pac)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml)
+ (depends ocaml menhir format cmdliner)
  (tags
   ("add topics" "to describe" your project)))
 

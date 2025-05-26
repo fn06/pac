@@ -1,4 +1,4 @@
 (executable
  (public_name pac)
  (name main)
- (libraries pac))
+ (libraries pac cmdliner))

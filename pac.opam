@@ -12,6 +12,9 @@ bug-reports: "https://github.com/username/reponame/issues"
 depends: [
   "dune" {>= "3.18"}
   "ocaml"
+  "menhir"
+  "format"
+  "cmdliner"
   "odoc" {with-doc}
 ]
 build: [
