@@ -934,7 +934,8 @@ let is_complete_solution state =
   let positive_derivations =
     List.filter_map
       (function
-        | Derivation (Positive (name, _), _, _) -> Some name | _ -> None)
+        | Derivation (Positive (name, _), _, _) -> Some name 
+        | _ -> None)
       state.partial_solution.assignments
   in
 
@@ -944,6 +945,7 @@ let is_complete_solution state =
       state.partial_solution.assignments
   in
 
+  (* All positive derivations need decisions to trigger dependency loading *)
   List.for_all (fun name -> List.mem name decisions) positive_derivations
 
 (* Extract solution from final state *)
