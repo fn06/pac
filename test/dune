@@ -19,6 +19,10 @@
  (libraries pac))
 
 (executable
+ (name debug_long_chain)
+ (libraries pac))
+
+(executable
  (name debug_example)
  (libraries pac))
 

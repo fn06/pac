@@ -350,14 +350,10 @@ and conflict_resolution state conflicting_incomp : solver_state internal_result
               let previous_satisfier_level =
                 get_assignment_level previous_satisfier
               in
-              let satisfier_level = get_assignment_level satisfier in
 
-              (* Check if we should stop resolution *)
-              if
-                is_decision satisfier
-                || previous_satisfier_level != satisfier_level
-              then
-                (* Add incompatibility and backtrack *)
+              (* Always try to continue resolution to get the full chain *)
+              if is_decision satisfier then
+                (* Hit a decision - this is as far back as we can trace *)
                 let new_assignments =
                   List.filter
                     (fun assignment ->
@@ -380,7 +376,7 @@ and conflict_resolution state conflicting_incomp : solver_state internal_result
                 in
                 Ok new_state
               else
-                (* Apply resolution to find prior cause *)
+                (* Continue resolution to build longer chain *)
                 let prior_cause =
                   create_prior_cause incomp satisfier satisfier_term
                     state.next_id
@@ -535,35 +531,33 @@ let rec explain_incompatibility incomp depth =
   let indent = String.make (depth * 2) ' ' in
   match incomp.cause with
   | External ext_cause -> Printf.sprintf "%s%s" indent (format_external_cause ext_cause)
-  | Derived (cause1, cause2) -> (
-      let format_term term =
-        let package = term_package term in
-        let versions = term_versions term in
-        let version_str =
-          if List.length versions = 1 then List.hd versions
-          else "(" ^ String.concat " or " versions ^ ")"
-        in
-        if is_positive term then Printf.sprintf "%s %s" package version_str
-        else Printf.sprintf "not %s %s" package version_str
-      in
-      let terms_str =
-        String.concat " and " (List.map format_term incomp.terms)
-      in
-
+  | Derived (cause1, cause2) -> 
       (* Check if this is a simple two-cause derivation for better formatting *)
       match (cause1.cause, cause2.cause) with
       | External ext1, External ext2 ->
-          Printf.sprintf "%sBecause %s is impossible:\n%s  - %s\n%s  - %s"
-            indent terms_str indent (format_external_cause ext1) indent (format_external_cause ext2)
+          Printf.sprintf "%s%s and %s, but this creates a conflict"
+            indent (format_external_cause ext1) (format_external_cause ext2)
       | _ ->
-          Printf.sprintf "%sBecause %s:\n%s\n%sand\n%s" indent terms_str
+          Printf.sprintf "%s%s\n%sand\n%s" indent
             (explain_incompatibility cause1 (depth + 1))
             indent
-            (explain_incompatibility cause2 (depth + 1)))
+            (explain_incompatibility cause2 (depth + 1))
 
 let explain_failure root_incompatibility =
-  Printf.sprintf "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
-    (explain_incompatibility root_incompatibility 0)
+  (* Try to provide more context for common patterns *)
+  let basic_explanation = explain_incompatibility root_incompatibility 0 in
+  
+  (* Check if this looks like a dependency conflict and add context *)
+  match root_incompatibility.cause with
+  | Derived (cause1, cause2) ->
+      (match (cause1.cause, cause2.cause) with
+      | (External (Dependency (depender1, _, _)), External (Dependency (depender2, _, _))) ->
+          Printf.sprintf "Version solving failed:\n\nBoth %s %s and %s %s are needed, but %s\n\nTherefore, no solution exists."
+            (fst depender1) (snd depender1) (fst depender2) (snd depender2) basic_explanation
+      | _ ->
+          Printf.sprintf "Version solving failed:\n\n%s\n\nTherefore, no solution exists." basic_explanation)
+  | _ ->
+      Printf.sprintf "Version solving failed:\n\n%s\n\nTherefore, no solution exists." basic_explanation
 
 (* Helper function to check if package has decision *)
 let has_decision_for_package package_name partial_solution =
