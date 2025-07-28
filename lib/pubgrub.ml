@@ -367,22 +367,119 @@ and process_incompatibilities (repo : repository) state incomps :
               in
               Error (NoSolution derived_incomp)
             else
-              (* One or more versions available - derive the term *)
-              let new_assignment =
-                Derivation
-                  (negated_term, incomp, state.partial_solution.decision_level)
+              (* One or more versions available - check for conflicts before deriving *)
+              (* Check if this positive derivation conflicts with existing negative derivations *)
+              let conflicting_negative_derivation = 
+                let rec find_conflict = function
+                  | [] -> None
+                  | Derivation (Negative (n, neg_versions), cause_incomp, _) :: _ when n = name ->
+                      (* Check if all available versions are forbidden *)
+                      if List.for_all (fun v -> List.mem v neg_versions) available_versions then
+                        Some cause_incomp
+                      else None
+                  | _ :: rest -> find_conflict rest
+                in
+                find_conflict state.partial_solution.assignments
               in
-              let new_partial_solution =
-                add_assignment new_assignment state.partial_solution
-              in
-              let new_state =
-                { state with partial_solution = new_partial_solution }
-              in
-              debug_printf "DEBUG: added positive derivation, continuing\n";
-              if !debug_enabled then flush_all ();
-              match process_incompatibilities repo new_state rest with
-              | Ok (final_state, changed_pkg) -> Ok (final_state, changed_pkg)
-              | Error err -> Error err)
+              match conflicting_negative_derivation with
+              | Some neg_cause_incomp ->
+                (* We have a conflict - derive a new incompatibility *)
+                debug_printf "DEBUG: Positive derivation %s conflicts with negative derivation\n" name;
+                debug_printf "  Negative was caused by incomp ID %d\n" neg_cause_incomp.id;
+                if !debug_enabled then flush_all ();
+                (* Create a derived incompatibility: the positive requirement is incompatible
+                   with whatever caused the negative derivation *)
+                let derived_incomp = {
+                  terms = List.filter (fun t -> term_package t <> name) incomp.terms;
+                  cause = Derived (incomp, neg_cause_incomp);
+                  id = state.next_id;
+                } in
+                let new_state = {
+                  state with 
+                  incompatibilities = derived_incomp :: state.incompatibilities;
+                  next_id = state.next_id + 1;
+                } in
+                debug_printf "DEBUG: Created derived incomp ID %d\n" derived_incomp.id;
+                (* Check if this derived incompatibility is satisfied *)
+                if incompatibility_satisfied new_state.partial_solution derived_incomp then (
+                  debug_printf "DEBUG: Derived incomp is satisfied, entering conflict resolution\n";
+                  if !debug_enabled then flush_all ();
+                  match conflict_resolution new_state derived_incomp with
+                | Ok (new_state, learned_incomp) ->
+                    debug_printf "DEBUG: conflict resolution succeeded\n";
+                    if !debug_enabled then flush_all ();
+                    (* After backtracking, continue processing with the learned incompatibility *)
+                    let new_state_with_learned = {
+                      new_state with
+                      incompatibilities = 
+                        if List.exists (fun i -> i.id = learned_incomp.id) new_state.incompatibilities
+                        then new_state.incompatibilities
+                        else learned_incomp :: new_state.incompatibilities
+                    } in
+                    if incompatibility_satisfied new_state_with_learned.partial_solution learned_incomp then (
+                      (* Check if this is a root-level conflict *)
+                      if List.length learned_incomp.terms = 0 || 
+                         (List.length learned_incomp.terms = 1 && 
+                          match learned_incomp.terms with
+                          | [Positive (name, versions)] -> 
+                              (* Check if this is a query package *)
+                              List.exists (fun assignment ->
+                                match assignment with
+                                | Decision ((n, v), 0) when n = name && List.mem v versions -> true
+                                | _ -> false
+                              ) new_state_with_learned.partial_solution.assignments
+                          | _ -> false) then (
+                        debug_printf "DEBUG: Root-level conflict - no solution!\n";
+                        if !debug_enabled then flush_all ();
+                        Error (NoSolution learned_incomp)
+                      ) else (
+                        (* Continue with conflict resolution *)
+                        debug_printf "DEBUG: Learned incomp still satisfied after backtrack, continuing resolution\n";
+                        if !debug_enabled then flush_all ();
+                        process_incompatibilities repo new_state_with_learned (learned_incomp :: incomps)
+                      )
+                    ) else if incompatibility_almost_satisfied new_state_with_learned.partial_solution learned_incomp then (
+                      (* Find the package name from the learned incompatibility to focus on *)
+                      let unsatisfied_term =
+                        get_unsatisfied_term new_state_with_learned.partial_solution learned_incomp
+                      in
+                      let changed_pkg = term_package unsatisfied_term in
+                      debug_printf
+                        "DEBUG: focusing on package %s after conflict resolution\n"
+                        changed_pkg;
+                      if !debug_enabled then flush_all ();
+                      Ok (new_state_with_learned, Some changed_pkg)
+                    ) else (
+                      (* The learned incompatibility is not immediately applicable, continue *)
+                      debug_printf "DEBUG: Learned incomp not immediately applicable, continuing\n";
+                      if !debug_enabled then flush_all ();
+                      process_incompatibilities repo new_state_with_learned rest
+                    )
+                  | Error err ->
+                    debug_printf "DEBUG: conflict resolution failed\n";
+                    if !debug_enabled then flush_all ();
+                    Error err
+                ) else (
+                  (* Derived incomp not satisfied, continue processing *)
+                  process_incompatibilities repo new_state (derived_incomp :: rest)
+                )
+              | _ ->
+                (* No conflict, proceed normally *)
+                let new_assignment =
+                  Derivation
+                    (negated_term, incomp, state.partial_solution.decision_level)
+                in
+                let new_partial_solution =
+                  add_assignment new_assignment state.partial_solution
+                in
+                let new_state =
+                  { state with partial_solution = new_partial_solution }
+                in
+                debug_printf "DEBUG: added positive derivation, continuing\n";
+                if !debug_enabled then flush_all ();
+                match process_incompatibilities repo new_state rest with
+                | Ok (final_state, changed_pkg) -> Ok (final_state, changed_pkg)
+                | Error err -> Error err)
         | Negative _ -> (
             let new_assignment =
               Derivation
@@ -435,8 +532,32 @@ and conflict_resolution state conflicting_incomp :
       (* Find the earliest assignment that makes the incompatibility satisfied *)
       match find_earliest_satisfying_assignment state.partial_solution incomp with
       | None -> 
-          debug_printf "DEBUG: No satisfying assignment found - no solution\n";
-          Error (NoSolution incomp)
+          debug_printf "DEBUG: No satisfying assignment found\n";
+          (* This might be due to a conflict between positive requirements and negative derivations *)
+          (* For now, we'll treat this as a root cause that needs to be traced back further *)
+          (* Create a derived incompatibility from the conflicting terms *)
+          let conflicting_terms = List.filter (fun term ->
+            match term with
+            | Positive (name, _) ->
+                (* Check if we have assignments that would satisfy this positive term *)
+                List.exists (function
+                  | Decision ((n, _), _) when n = name -> true
+                  | Derivation (Positive (n, _), _, _) when n = name -> true
+                  | _ -> false
+                ) state.partial_solution.assignments
+            | _ -> true
+          ) incomp.terms in
+          if List.length conflicting_terms > 0 then (
+            debug_printf "DEBUG: Creating derived incompatibility from conflicting terms\n";
+            let derived_incomp = {
+              terms = conflicting_terms;
+              cause = incomp.cause; (* Keep the original cause for now *)
+              id = state.next_id;
+            } in
+            Error (NoSolution derived_incomp)
+          ) else (
+            Error (NoSolution incomp)
+          )
       | Some (satisfier, satisfier_term) -> (
           debug_printf "DEBUG: Found satisfier for term %s\n" (term_package satisfier_term);
           debug_printf "  Satisfier type: %s\n" 
