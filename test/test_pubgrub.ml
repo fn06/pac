@@ -82,7 +82,7 @@ let test_dependency_conversion () =
 let test_initial_state () =
   Printf.printf "=== Testing Initial State Creation ===\n";
 
-  let simple_repo = [("A", "1"); ("B", "1")] in
+  let simple_repo = [ ("A", "1"); ("B", "1") ] in
   let state = create_initial_state simple_repo simple_deps simple_query in
 
   Printf.printf "Number of incompatibilities: %d\n"
@@ -144,7 +144,7 @@ let test_single_package () =
   let single_query = [ make_package "A" "1" ] in
 
   Printf.printf "Solving single package case...\n";
-  let single_repo = [make_package "A" "1"] in
+  let single_repo = [ make_package "A" "1" ] in
   match solve single_repo single_deps single_query with
   | Solution packages ->
       Printf.printf "Single package solution: %d packages\n"
@@ -177,7 +177,7 @@ let test_simple_dependency () =
   Printf.printf "Starting solve (will timeout after showing initial state)...\n";
 
   (* Let's examine the initial state first *)
-  let complex_repo = [("A", "1"); ("B", "1"); ("C", "1")] in
+  let complex_repo = [ ("A", "1"); ("B", "1"); ("C", "1") ] in
   let initial_state = create_initial_state complex_repo deps query in
   Printf.printf "Initial state created successfully:\n";
   Printf.printf "  Incompatibilities: %d\n"
@@ -219,7 +219,7 @@ let test_complete_dependency () =
   Printf.printf "Complete case: A 1 -> B 1, B 1 -> (nothing)\n";
   Printf.printf "Query: A 1\n";
 
-  let repo = [("A", "1"); ("B", "1"); ("C", "1")] in
+  let repo = [ ("A", "1"); ("B", "1"); ("C", "1") ] in
   let initial_state = create_initial_state repo deps query in
   Printf.printf "Initial state:\n";
   Printf.printf "  Incompatibilities: %d\n"

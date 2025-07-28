@@ -52,6 +52,12 @@ type solve_result = Solution of package list | Error of solve_error
 (* Internal result type for intermediate operations *)
 type 'a internal_result = Ok of 'a | Error of solve_error
 
+(* Helper functions *)
+let rec list_take n = function
+  | [] -> []
+  | x :: xs when n > 0 -> x :: list_take (n - 1) xs
+  | _ -> []
+
 (* Helper functions for terms *)
 let term_package = function
   | Positive (name, _) -> name
@@ -291,93 +297,173 @@ and process_incompatibilities (repo : repository) state incomps :
 (* Conflict Resolution Algorithm *)
 and conflict_resolution state conflicting_incomp : solver_state internal_result
     =
-  let resolve_conflict incomp =
-    Printf.printf "DEBUG CONFLICT: Resolving incompatibility ID %d\n" incomp.id;
-    Printf.printf "  Terms: ";
-    List.iter (fun term ->
-      Printf.printf "[%s %s %s] " 
-        (term_package term)
-        (if is_positive term then "MUST" else "MUST_NOT")
-        (String.concat "," (term_versions term))
-    ) incomp.terms;
-    Printf.printf "\n";
-    Printf.printf "  Current assignments: %d\n" (List.length state.partial_solution.assignments);
-    
+  let rec resolve_conflict incomp =
     (* Check if this is a root-level failure *)
     if
       List.length incomp.terms = 0
       || List.length incomp.terms = 1
          &&
-         match List.hd incomp.terms with Positive (_, _) -> true | _ -> false
-    then (
-      Printf.printf "  ROOT LEVEL FAILURE - No solution\n";
-      Error (NoSolution incomp)
-    ) else if incomp.id > 10000 then (
-      (* Prevent infinite loops by limiting derived incompatibility depth *)
-      Printf.printf "  INFINITE LOOP DETECTED - Terminating at ID %d\n" incomp.id;
-      Error (NoSolution incomp)
-    ) else
-      (* Find the satisfying assignment *)
-      match find_satisfying_assignment state.partial_solution incomp with
-      | None -> 
-          Printf.printf "  No satisfying assignment found\n";
-          Error (NoSolution incomp)
-      | Some (satisfier, satisfier_level) ->
-          Printf.printf "  Found satisfying assignment at level %d\n" satisfier_level;
-          
-          (* Simple backtracking - remove assignments above satisfier level *)
-          let new_assignments =
-            List.filter
-              (fun assignment ->
-                get_assignment_level assignment <= satisfier_level)
-              state.partial_solution.assignments
-          in
-          let new_partial_solution =
-            { assignments = new_assignments; decision_level = satisfier_level }
-          in
-          let new_incomp = derive_incompatibility incomp satisfier in
-          
-          Printf.printf "  Created derived incompatibility ID %d\n" new_incomp.id;
-          Printf.printf "    Derived terms: ";
-          List.iter (fun term ->
-            Printf.printf "[%s %s %s] " 
-              (term_package term)
-              (if is_positive term then "MUST" else "MUST_NOT")
-              (String.concat "," (term_versions term))
-          ) new_incomp.terms;
-          Printf.printf "\n";
-          Printf.printf "  Backtracked to level %d, removed %d assignments\n" 
-            satisfier_level 
-            (List.length state.partial_solution.assignments - List.length new_assignments);
-          
-          let new_state =
-            {
-              incompatibilities = new_incomp :: state.incompatibilities;
-              partial_solution = new_partial_solution;
-              next_id = state.next_id + 1;
-            }
-          in
-          Ok new_state
+         match List.hd incomp.terms with
+         | Positive (_, _) -> true (* Root package can't be selected *)
+         | _ -> false
+    then Error (NoSolution incomp)
+    else
+      (* Find the earliest assignment that makes the incompatibility satisfied *)
+      match
+        find_earliest_satisfying_assignment state.partial_solution incomp
+      with
+      | None -> Error (NoSolution incomp)
+      | Some (satisfier, satisfier_term) -> (
+          (* Find previous satisfier *)
+          match
+            find_previous_satisfier_for_incomp state.partial_solution incomp
+              satisfier
+          with
+          | None ->
+              (* No previous satisfier - backtrack to decision level 1 *)
+              let previous_satisfier_level = 1 in
+              let new_assignments =
+                List.filter
+                  (fun assignment ->
+                    get_assignment_level assignment <= previous_satisfier_level)
+                  state.partial_solution.assignments
+              in
+              let new_partial_solution =
+                {
+                  assignments = new_assignments;
+                  decision_level = previous_satisfier_level;
+                }
+              in
+              let new_state =
+                {
+                  incompatibilities = incomp :: state.incompatibilities;
+                  partial_solution = new_partial_solution;
+                  next_id = state.next_id;
+                }
+              in
+              Ok new_state
+          | Some previous_satisfier ->
+              let previous_satisfier_level =
+                get_assignment_level previous_satisfier
+              in
+              let satisfier_level = get_assignment_level satisfier in
+
+              (* Check if we should stop resolution *)
+              if
+                is_decision satisfier
+                || previous_satisfier_level != satisfier_level
+              then
+                (* Add incompatibility and backtrack *)
+                let new_assignments =
+                  List.filter
+                    (fun assignment ->
+                      get_assignment_level assignment
+                      <= previous_satisfier_level)
+                    state.partial_solution.assignments
+                in
+                let new_partial_solution =
+                  {
+                    assignments = new_assignments;
+                    decision_level = previous_satisfier_level;
+                  }
+                in
+                let new_state =
+                  {
+                    incompatibilities = incomp :: state.incompatibilities;
+                    partial_solution = new_partial_solution;
+                    next_id = state.next_id;
+                  }
+                in
+                Ok new_state
+              else
+                (* Apply resolution to find prior cause *)
+                let prior_cause =
+                  create_prior_cause incomp satisfier satisfier_term
+                    state.next_id
+                in
+                resolve_conflict prior_cause)
   in
   resolve_conflict conflicting_incomp
 
-and find_satisfying_assignment partial_solution incomp =
-  (* Find the earliest assignment that satisfies the incompatibility *)
-  let rec find_earliest best_assignment = function
-    | [] -> best_assignment
+and find_earliest_satisfying_assignment partial_solution incomp =
+  (* Find the earliest assignment such that incomp is satisfied by partial solution up to and including it *)
+  let rec check_assignments prefix_assignments = function
+    | [] -> None
     | assignment :: rest ->
-        let assignment_packages = get_assignment_packages assignment in
-        if List.exists (packages_satisfy_term assignment_packages) incomp.terms
-        then
-          let level = get_assignment_level assignment in
-          match best_assignment with
-          | None -> find_earliest (Some (assignment, level)) rest
-          | Some (_, best_level) when level < best_level ->
-              find_earliest (Some (assignment, level)) rest
-          | Some _ -> find_earliest best_assignment rest
-        else find_earliest best_assignment rest
+        let test_partial =
+          {
+            partial_solution with
+            assignments = prefix_assignments @ [ assignment ];
+          }
+        in
+        if incompatibility_satisfied test_partial incomp then
+          (* Find which term this assignment satisfies *)
+          let assignment_packages = get_assignment_packages assignment in
+          let satisfied_term =
+            List.find (packages_satisfy_term assignment_packages) incomp.terms
+          in
+          Some (assignment, satisfied_term)
+        else check_assignments (prefix_assignments @ [ assignment ]) rest
   in
-  find_earliest None partial_solution.assignments
+  (* Assignments are in reverse chronological order, so reverse to get chronological *)
+  let chronological_assignments = List.rev partial_solution.assignments in
+  check_assignments [] chronological_assignments
+
+and find_previous_satisfier_for_incomp partial_solution incomp satisfier =
+  (* Find earliest assignment before satisfier such that incomp is satisfied by partial solution up to satisfier plus this assignment *)
+  let assignments = List.rev partial_solution.assignments in
+  (* Convert to chronological order *)
+  let rec find_satisfier_index i = function
+    | [] -> None
+    | a :: _ when a = satisfier -> Some i
+    | _ :: rest -> find_satisfier_index (i + 1) rest
+  in
+  match find_satisfier_index 0 assignments with
+  | None -> None
+  | Some satisfier_idx ->
+      (* Check each assignment before satisfier *)
+      let rec check_previous_assignments i =
+        if i >= satisfier_idx then None
+        else
+          let candidate = List.nth assignments i in
+          let test_assignments =
+            list_take (i + 1) assignments @ [ satisfier ]
+          in
+          let test_partial =
+            { partial_solution with assignments = List.rev test_assignments }
+          in
+          if incompatibility_satisfied test_partial incomp then Some candidate
+          else check_previous_assignments (i + 1)
+      in
+      check_previous_assignments 0
+
+and is_decision = function Decision _ -> true | Derivation _ -> false
+
+and create_prior_cause incomp satisfier satisfier_term next_id =
+  (* Create prior cause by applying resolution between incomp and satisfier's cause *)
+  match satisfier with
+  | Decision _ ->
+      (* No cause to resolve with - this shouldn't happen in proper conflict resolution *)
+      incomp
+  | Derivation (_, cause_incomp, _) ->
+      (* Union of terms from incomp and cause_incomp, minus terms referring to satisfier's package *)
+      let satisfier_package = term_package satisfier_term in
+      let incomp_terms =
+        List.filter (fun t -> term_package t != satisfier_package) incomp.terms
+      in
+      let cause_terms =
+        List.filter
+          (fun t -> term_package t != satisfier_package)
+          cause_incomp.terms
+      in
+      let merged_terms = incomp_terms @ cause_terms in
+      (* Remove duplicates *)
+      let unique_terms = List.sort_uniq compare merged_terms in
+      {
+        terms = unique_terms;
+        cause = Derived (incomp, cause_incomp);
+        id = next_id;
+      }
 
 and get_assignment_level = function
   | Decision (_, level) -> level
@@ -388,15 +474,6 @@ and get_assignment_packages = function
   | Derivation (Positive (name, versions), _, _) -> (
       match versions with [] -> [] | v :: _ -> [ (name, v) ])
   | Derivation (Negative _, _, _) -> []
-
-and derive_incompatibility original_incomp _satisfier =
-  (* Simplified derivation - in full implementation this would use resolution *)
-  {
-    original_incomp with
-    id = original_incomp.id + 1000;
-    (* Temporary ID scheme *)
-    cause = Derived (original_incomp, original_incomp);
-  }
 
 (* Helper function to check if package has decision *)
 let has_decision_for_package package_name partial_solution =

@@ -5,7 +5,6 @@
  (name test_pubgrub)
  (libraries pac))
 
-
 (executable
  (name simple_debug)
  (libraries pac))

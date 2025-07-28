@@ -14,7 +14,8 @@ let manual_debug () =
   let query = [ ("A", "1") ] in
 
   Printf.printf "1. Creating initial state...\n";
-  let repo = [("A", "1"); ("B", "1")] in (* Define available packages *)
+  let repo = [ ("A", "1"); ("B", "1") ] in
+  (* Define available packages *)
   let initial_state = create_initial_state repo deps query in
 
   Printf.printf "   Incompatibilities: %d\n"

@@ -21,9 +21,7 @@ let debug_empty () =
 
   let repo = Pac.repository_from_ast ast_deps in
   Printf.printf "\nAvailable packages: %d\n" (List.length repo);
-  List.iter
-    (fun (name, version) -> Printf.printf "  %s %s\n" name version)
-    repo;
+  List.iter (fun (name, version) -> Printf.printf "  %s %s\n" name version) repo;
 
   Printf.printf "\n=== DEBUG COMPLETE ===\n"
 
