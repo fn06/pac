@@ -10,6 +10,7 @@ module Core = struct
   type package = Ast.package
   type dependency = package * (name * version set)
   type dependencies = dependency set
+  type repository = package set
   type query = package set
   type resolver_resolution = dependencies -> query -> package set
 end
@@ -19,6 +20,11 @@ let convert_dependency (pkg, targets) : Core.dependencies =
 
 let of_ast_expression (deps : Ast.expression) : Core.dependencies =
   List.flatten @@ List.map convert_dependency deps
+
+let repository_from_ast (deps : Ast.expression) : Core.repository =
+  List.fold_left
+    (fun acc (pkg, _targets) -> if List.mem pkg acc then acc else pkg :: acc)
+    [] deps
 
 let to_ast_dependency ((pkg, (name, versions)) : Core.dependency) :
     Ast.dependency =

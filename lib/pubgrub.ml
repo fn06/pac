@@ -4,6 +4,7 @@ type version = string
 type package = name * version
 type dependency = package * (name * version list)
 type dependencies = dependency list
+type repository = package list
 type query = package list
 
 (* Term represents a statement about a package that may be true or false *)
@@ -181,28 +182,38 @@ let dependencies_to_incompatibilities (deps : dependencies) =
   convert [] 0 deps
 
 (* Create initial solver state *)
-let create_initial_state (deps : dependencies) (query : query) =
+let create_initial_state (repo : repository) (deps : dependencies)
+    (query : query) =
   let dep_incomps = dependencies_to_incompatibilities deps in
   let next_id = List.length dep_incomps in
 
+  (* Check that all query packages are available *)
+  List.iter
+    (fun query_pkg ->
+      if not (List.mem query_pkg repo) then
+        failwith
+          (Printf.sprintf "Query package %s %s is not available" (fst query_pkg)
+             (snd query_pkg)))
+    query;
+
   (* Add query requirements by starting with them in the partial solution *)
-  let query_assignments = List.map (fun (name, version) ->
-    Decision ((name, version), 0)
-  ) query in
-  
-  let initial_partial_solution = {
-    assignments = query_assignments;
-    decision_level = 0;
-  } in
+  let query_assignments =
+    List.map (fun (name, version) -> Decision ((name, version), 0)) query
+  in
+
+  let initial_partial_solution =
+    { assignments = query_assignments; decision_level = 0 }
+  in
 
   {
     incompatibilities = dep_incomps;
     partial_solution = initial_partial_solution;
-    next_id = next_id;
+    next_id;
   }
 
 (* Unit Propagation Algorithm *)
-let rec unit_propagation state package_names : solver_state internal_result =
+let rec unit_propagation (repo : repository) state package_names :
+    solver_state internal_result =
   match package_names with
   | [] -> Ok state
   | package_name :: rest -> (
@@ -213,15 +224,16 @@ let rec unit_propagation state package_names : solver_state internal_result =
           state.incompatibilities
       in
 
-      match process_incompatibilities state relevant_incomps with
+      match process_incompatibilities repo state relevant_incomps with
       | Ok new_state ->
           let changed_packages =
             if new_state != state then [ package_name ] else []
           in
-          unit_propagation new_state (rest @ changed_packages)
+          unit_propagation repo new_state (rest @ changed_packages)
       | Error err -> Error err)
 
-and process_incompatibilities state incomps : solver_state internal_result =
+and process_incompatibilities (repo : repository) state incomps :
+    solver_state internal_result =
   match incomps with
   | [] -> Ok state
   | incomp :: rest ->
@@ -238,35 +250,81 @@ and process_incompatibilities state incomps : solver_state internal_result =
           get_unsatisfied_term state.partial_solution incomp
         in
         let negated_term = negate_term unsatisfied_term in
-        let new_assignment =
-          Derivation
-            (negated_term, incomp, state.partial_solution.decision_level)
-        in
-        let new_partial_solution =
-          add_assignment new_assignment state.partial_solution
-        in
-        let new_state =
-          { state with partial_solution = new_partial_solution }
-        in
-        process_incompatibilities new_state rest
-      else process_incompatibilities state rest
+
+        (* Check if positive derivation requires unavailable packages *)
+        match negated_term with
+        | Positive (name, versions) ->
+            let available_versions =
+              List.filter
+                (fun version -> List.mem (name, version) repo)
+                versions
+            in
+            if List.length available_versions = 0 then
+              (* This is a fundamental failure - the required package doesn't exist *)
+              Error (NoSolution incomp)
+            else
+              let new_assignment =
+                Derivation
+                  (negated_term, incomp, state.partial_solution.decision_level)
+              in
+              let new_partial_solution =
+                add_assignment new_assignment state.partial_solution
+              in
+              let new_state =
+                { state with partial_solution = new_partial_solution }
+              in
+              process_incompatibilities repo new_state rest
+        | Negative _ ->
+            let new_assignment =
+              Derivation
+                (negated_term, incomp, state.partial_solution.decision_level)
+            in
+            let new_partial_solution =
+              add_assignment new_assignment state.partial_solution
+            in
+            let new_state =
+              { state with partial_solution = new_partial_solution }
+            in
+            process_incompatibilities repo new_state rest
+      else process_incompatibilities repo state rest
 
 (* Conflict Resolution Algorithm *)
 and conflict_resolution state conflicting_incomp : solver_state internal_result
     =
   let resolve_conflict incomp =
+    Printf.printf "DEBUG CONFLICT: Resolving incompatibility ID %d\n" incomp.id;
+    Printf.printf "  Terms: ";
+    List.iter (fun term ->
+      Printf.printf "[%s %s %s] " 
+        (term_package term)
+        (if is_positive term then "MUST" else "MUST_NOT")
+        (String.concat "," (term_versions term))
+    ) incomp.terms;
+    Printf.printf "\n";
+    Printf.printf "  Current assignments: %d\n" (List.length state.partial_solution.assignments);
+    
     (* Check if this is a root-level failure *)
     if
       List.length incomp.terms = 0
       || List.length incomp.terms = 1
          &&
          match List.hd incomp.terms with Positive (_, _) -> true | _ -> false
-    then Error (NoSolution incomp)
-    else
+    then (
+      Printf.printf "  ROOT LEVEL FAILURE - No solution\n";
+      Error (NoSolution incomp)
+    ) else if incomp.id > 10000 then (
+      (* Prevent infinite loops by limiting derived incompatibility depth *)
+      Printf.printf "  INFINITE LOOP DETECTED - Terminating at ID %d\n" incomp.id;
+      Error (NoSolution incomp)
+    ) else
       (* Find the satisfying assignment *)
       match find_satisfying_assignment state.partial_solution incomp with
-      | None -> Error (NoSolution incomp)
+      | None -> 
+          Printf.printf "  No satisfying assignment found\n";
+          Error (NoSolution incomp)
       | Some (satisfier, satisfier_level) ->
+          Printf.printf "  Found satisfying assignment at level %d\n" satisfier_level;
+          
           (* Simple backtracking - remove assignments above satisfier level *)
           let new_assignments =
             List.filter
@@ -278,6 +336,20 @@ and conflict_resolution state conflicting_incomp : solver_state internal_result
             { assignments = new_assignments; decision_level = satisfier_level }
           in
           let new_incomp = derive_incompatibility incomp satisfier in
+          
+          Printf.printf "  Created derived incompatibility ID %d\n" new_incomp.id;
+          Printf.printf "    Derived terms: ";
+          List.iter (fun term ->
+            Printf.printf "[%s %s %s] " 
+              (term_package term)
+              (if is_positive term then "MUST" else "MUST_NOT")
+              (String.concat "," (term_versions term))
+          ) new_incomp.terms;
+          Printf.printf "\n";
+          Printf.printf "  Backtracked to level %d, removed %d assignments\n" 
+            satisfier_level 
+            (List.length state.partial_solution.assignments - List.length new_assignments);
+          
           let new_state =
             {
               incompatibilities = new_incomp :: state.incompatibilities;
@@ -333,7 +405,7 @@ let has_decision_for_package package_name partial_solution =
     partial_solution.assignments
 
 (* Decision Making Algorithm *)
-let make_decision state =
+let make_decision (repo : repository) state =
   (* Find a package that has positive derivations but no decision *)
   let rec find_undecided_package = function
     | [] -> None
@@ -348,10 +420,18 @@ let make_decision state =
 
   match find_undecided_package state.partial_solution.assignments with
   | None -> None (* No more decisions needed *)
-  | Some (package_name, available_versions) -> (
-      (* Choose first available version (simplified heuristic) *)
+  | Some (package_name, required_versions) -> (
+      (* Filter to only versions that are actually available *)
+      let available_versions =
+        List.filter
+          (fun version -> List.mem (package_name, version) repo)
+          required_versions
+      in
+
       match available_versions with
-      | [] -> None
+      | [] ->
+          (* No available versions - this should trigger a conflict *)
+          None
       | version :: _ ->
           let new_decision_level = state.partial_solution.decision_level + 1 in
           let new_assignment =
@@ -390,19 +470,20 @@ let extract_solution state =
     state.partial_solution.assignments
 
 (* Main PubGrub solve function *)
-let solve (deps : dependencies) (query : query) : solve_result =
-  let initial_state = create_initial_state deps query in
+let solve (repo : repository) (deps : dependencies) (query : query) :
+    solve_result =
+  let initial_state = create_initial_state repo deps query in
 
   let rec solve_loop state next_package : solve_result =
     (* Unit propagation *)
-    match unit_propagation state [ next_package ] with
+    match unit_propagation repo state [ next_package ] with
     | Error err -> Error err
     | Ok new_state -> (
         if is_complete_solution new_state then
           Solution (extract_solution new_state)
         else
           (* Decision making *)
-          match make_decision new_state with
+          match make_decision repo new_state with
           | None ->
               Solution (extract_solution new_state)
               (* No more decisions needed *)

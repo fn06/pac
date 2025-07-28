@@ -5,10 +5,31 @@
  (name test_pubgrub)
  (libraries pac))
 
-(executable
- (name debug_pubgrub)
- (libraries pac))
 
 (executable
  (name simple_debug)
+ (libraries pac))
+
+(executable
+ (name test_pathological)
+ (libraries pac))
+
+(executable
+ (name analyze_missing)
+ (libraries pac))
+
+(executable
+ (name debug_example)
+ (libraries pac))
+
+(executable
+ (name debug_empty)
+ (libraries pac))
+
+(executable
+ (name debug_minimal)
+ (libraries pac))
+
+(executable
+ (name debug_pubgrub_simple)
  (libraries pac))

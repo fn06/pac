@@ -32,6 +32,7 @@ let major_version v = List.hd (String.split_on_char '.' v)
 let check_cmd filename query_str resolution_str granularity calculus () =
   let ast_deps = process_file filename in
   let deps = of_ast_expression ast_deps in
+  let repo = repository_from_ast ast_deps in
   let g =
     match granularity with
     | "major" -> major_version
@@ -81,7 +82,7 @@ let check_cmd filename query_str resolution_str granularity calculus () =
       Printf.printf "\tValid concurrent resolution: %b\n" concurrent_resolution
   | "pubgrub" -> (
       (* Use PubGrub solver *)
-      match Pubgrub.solve deps query with
+      match Pubgrub.solve repo deps query with
       | Pubgrub.Solution solution ->
           Printf.printf "PubGrub resolution:\n";
           Printf.printf "\tSolution found: %s\n"
@@ -250,12 +251,13 @@ let default_info =
 let solve_cmd filename query_str () =
   let ast_deps = process_file filename in
   let deps = of_ast_expression ast_deps in
+  let repo = repository_from_ast ast_deps in
   let query = List.map parse_package (String.split_on_char ',' query_str) in
 
   Printf.printf "Query: %s\n"
     (String.concat ", " (List.map string_of_package query));
 
-  match Pubgrub.solve deps query with
+  match Pubgrub.solve repo deps query with
   | Pubgrub.Solution solution ->
       Printf.printf "Solution found:\n";
       List.iter
