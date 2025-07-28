@@ -69,7 +69,7 @@ let debug_example () =
         incomp.terms;
       Printf.printf "Cause: %s\n"
         (match incomp.cause with
-        | External ext_cause -> "External: " ^ (format_external_cause ext_cause)
+        | External ext_cause -> "External: " ^ format_external_cause ext_cause
         | Derived (_, _) -> "Derived from conflict resolution")
   | Error (InvalidInput msg) ->
       Printf.printf "✗ INVALID INPUT: %s\n" msg;
