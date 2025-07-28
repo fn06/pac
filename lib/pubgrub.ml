@@ -518,6 +518,42 @@ and get_assignment_packages = function
       match versions with [] -> [] | v :: _ -> [ (name, v) ])
   | Derivation (Negative _, _, _) -> []
 
+(* Error reporting functions *)
+let rec explain_incompatibility incomp depth =
+  let indent = String.make (depth * 2) ' ' in
+  match incomp.cause with
+  | External msg -> Printf.sprintf "%s%s" indent msg
+  | Derived (cause1, cause2) -> (
+      let format_term term =
+        let package = term_package term in
+        let versions = term_versions term in
+        let version_str =
+          if List.length versions = 1 then List.hd versions
+          else "(" ^ String.concat " or " versions ^ ")"
+        in
+        if is_positive term then Printf.sprintf "%s %s" package version_str
+        else Printf.sprintf "not %s %s" package version_str
+      in
+      let terms_str =
+        String.concat " and " (List.map format_term incomp.terms)
+      in
+
+      (* Check if this is a simple two-cause derivation for better formatting *)
+      match (cause1.cause, cause2.cause) with
+      | External msg1, External msg2 ->
+          Printf.sprintf "%sBecause %s is impossible:\n%s  - %s\n%s  - %s"
+            indent terms_str indent msg1 indent msg2
+      | _ ->
+          Printf.sprintf "%sBecause %s:\n%s\n%sand\n%s" indent terms_str
+            (explain_incompatibility cause1 (depth + 1))
+            indent
+            (explain_incompatibility cause2 (depth + 1)))
+
+let explain_failure root_incompatibility =
+  Printf.sprintf
+    "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
+    (explain_incompatibility root_incompatibility 0)
+
 (* Helper function to check if package has decision *)
 let has_decision_for_package package_name partial_solution =
   List.exists

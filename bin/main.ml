@@ -92,8 +92,7 @@ let check_cmd filename query_str resolution_str granularity calculus () =
             && List.for_all (fun pkg -> List.mem pkg resolution) solution)
       | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
           Printf.printf "PubGrub resolution:\n";
-          Printf.printf "\tNo solution exists (incompatibility id: %d)\n"
-            incomp.id
+          Printf.printf "\t%s\n" (Pubgrub.explain_failure incomp)
       | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
           Printf.printf "PubGrub resolution:\n";
           Printf.printf "\tInvalid input: %s\n" msg)
@@ -264,7 +263,7 @@ let solve_cmd filename query_str () =
         (fun (name, version) -> Printf.printf "  %s %s\n" name version)
         solution
   | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
-      Printf.printf "No solution exists (incompatibility id: %d)\n" incomp.id
+      Printf.printf "%s\n" (Pubgrub.explain_failure incomp)
   | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
       Printf.printf "Invalid input: %s\n" msg
 

@@ -41,10 +41,9 @@ let test_case name pac_file query expected_result =
             (if is_positive term then "MUST" else "MUST NOT")
             (String.concat "," (term_versions term)))
         incomp.terms;
-      Printf.printf "Cause: %s\n"
-        (match incomp.cause with
-        | External msg -> "External: " ^ msg
-        | Derived (_, _) -> "Derived from conflict resolution");
+      Printf.printf "\n--- DETAILED EXPLANATION ---\n";
+      Printf.printf "%s\n" (explain_failure incomp);
+      Printf.printf "--- END EXPLANATION ---\n";
       Printf.printf "Expected: %s\n" expected_result
   | Error (InvalidInput msg) ->
       Printf.printf "✗ INVALID INPUT: %s\n" msg;
