@@ -90,9 +90,9 @@ let check_cmd filename query_str resolution_str granularity calculus () =
           Printf.printf "\tMatches provided resolution: %b\n"
             (List.for_all (fun pkg -> List.mem pkg solution) resolution
             && List.for_all (fun pkg -> List.mem pkg resolution) solution)
-      | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
+      | Pubgrub.Error (Pubgrub.NoSolution (incomp, all_incomps)) ->
           Printf.printf "PubGrub resolution:\n";
-          Printf.printf "\t%s\n" (Pubgrub.explain_failure incomp)
+          Printf.printf "\t%s\n" (Pubgrub.explain_failure incomp all_incomps)
       | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
           Printf.printf "PubGrub resolution:\n";
           Printf.printf "\tInvalid input: %s\n" msg)
@@ -153,6 +153,10 @@ let resolution_arg =
     required
     & opt (some string) None
     & info [ "r"; "resolution" ] ~docv:"RESOLUTION" ~doc)
+
+let debug_arg =
+  let doc = "Enable debug output" in
+  Arg.(value & flag & info [ "d"; "debug" ] ~doc)
 
 let parse_term = Term.(const parse_cmd $ file_arg)
 
@@ -247,12 +251,13 @@ let default_info =
         `P "  $(mname) solve -f deps.txt -q 'A 1.0.0'";
       ]
 
-let solve_cmd filename query_str () =
+let solve_cmd filename query_str debug () =
   let ast_deps = process_file filename in
   let deps = of_ast_expression ast_deps in
   let repo = repository_from_ast ast_deps in
   let query = List.map parse_package (String.split_on_char ',' query_str) in
 
+  Pubgrub.set_debug debug;
   Printf.printf "Query: %s\n"
     (String.concat ", " (List.map string_of_package query));
 
@@ -262,12 +267,12 @@ let solve_cmd filename query_str () =
       List.iter
         (fun (name, version) -> Printf.printf "  %s %s\n" name version)
         solution
-  | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
-      Printf.printf "%s\n" (Pubgrub.explain_failure incomp)
+  | Pubgrub.Error (Pubgrub.NoSolution (incomp, all_incomps)) ->
+      Printf.printf "%s\n" (Pubgrub.explain_failure incomp all_incomps)
   | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
       Printf.printf "Invalid input: %s\n" msg
 
-let solve_term = Term.(const solve_cmd $ file_arg $ query_arg $ const ())
+let solve_term = Term.(const solve_cmd $ file_arg $ query_arg $ debug_arg $ const ())
 
 let solve_info =
   Cmd.info "solve" ~doc:"Solve dependencies using PubGrub algorithm"

@@ -1,3 +1,8 @@
+let debug_enabled = ref false
+let debug_printf fmt = 
+  if !debug_enabled then Printf.printf fmt else Printf.ifprintf stdout fmt
+let set_debug enabled = debug_enabled := enabled
+
 (* Core types from the Package Calculus *)
 type name = string
 type version = string
@@ -52,7 +57,7 @@ type solver_state = {
 
 (* Error types *)
 type solve_error =
-  | NoSolution of incompatibility (* Root cause incompatibility *)
+  | NoSolution of incompatibility * incompatibility list (* Root cause incompatibility and all incompatibilities *)
   | InvalidInput of string
 
 type solve_result = Solution of package list | Error of solve_error
@@ -224,17 +229,17 @@ let create_initial_state (repo : repository) (deps : dependencies)
 (* Unit Propagation Algorithm *)
 let rec unit_propagation (repo : repository) state package_names :
     solver_state internal_result =
-  Printf.printf "DEBUG: unit_propagation called with packages: [%s]\n"
+  debug_printf "DEBUG: unit_propagation called with packages: [%s]\n"
     (String.concat "; " package_names);
-  flush_all ();
+  if !debug_enabled then flush_all ();
   match package_names with
   | [] ->
-      Printf.printf "DEBUG: unit_propagation done (empty package list)\n";
-      flush_all ();
+      debug_printf "DEBUG: unit_propagation done (empty package list)\n";
+      if !debug_enabled then flush_all ();
       Ok state
   | package_name :: rest -> (
-      Printf.printf "DEBUG: processing package %s\n" package_name;
-      flush_all ();
+      debug_printf "DEBUG: processing package %s\n" package_name;
+      if !debug_enabled then flush_all ();
       let relevant_incomps =
         List.filter
           (fun incomp ->
@@ -258,51 +263,51 @@ and process_incompatibilities (repo : repository) state incomps :
     (solver_state * string option) internal_result =
   match incomps with
   | [] ->
-      Printf.printf "DEBUG: process_incompatibilities done (no incomps)\n";
-      flush_all ();
+      debug_printf "DEBUG: process_incompatibilities done (no incomps)\n";
+      if !debug_enabled then flush_all ();
       Ok (state, None)
   | incomp :: rest ->
-      Printf.printf "DEBUG: checking incomp ID %d\n" incomp.id;
-      flush_all ();
+      debug_printf "DEBUG: checking incomp ID %d\n" incomp.id;
+      if !debug_enabled then flush_all ();
       if incompatibility_satisfied state.partial_solution incomp then (
         (* Conflict detected - need conflict resolution *)
-        Printf.printf "DEBUG: incomp %d is satisfied - CONFLICT!\n" incomp.id;
-        flush_all ();
+        debug_printf "DEBUG: incomp %d is satisfied - CONFLICT!\n" incomp.id;
+        if !debug_enabled then flush_all ();
         match conflict_resolution state incomp with
         | Ok (new_state, learned_incomp) ->
-            Printf.printf "DEBUG: conflict resolution succeeded\n";
-            flush_all ();
+            debug_printf "DEBUG: conflict resolution succeeded\n";
+            if !debug_enabled then flush_all ();
             (* Check if the learned incompatibility is satisfied - if so, no solution exists *)
             if incompatibility_satisfied new_state.partial_solution learned_incomp then (
-              Printf.printf "DEBUG: Learned incomp is satisfied - no solution!\n";
-              flush_all ();
-              Error (NoSolution learned_incomp)
+              debug_printf "DEBUG: Learned incomp is satisfied - no solution!\n";
+              if !debug_enabled then flush_all ();
+              Error (NoSolution (learned_incomp, new_state.incompatibilities))
             ) else if incompatibility_almost_satisfied new_state.partial_solution learned_incomp then (
               (* Find the package name from the learned incompatibility to focus on *)
               let unsatisfied_term =
                 get_unsatisfied_term new_state.partial_solution learned_incomp
               in
               let changed_pkg = term_package unsatisfied_term in
-              Printf.printf
+              debug_printf
                 "DEBUG: focusing on package %s after conflict resolution\n"
                 changed_pkg;
-              flush_all ();
+              if !debug_enabled then flush_all ();
               Ok (new_state, Some changed_pkg)
             ) else (
               (* The learned incompatibility is not immediately applicable, continue *)
-              Printf.printf "DEBUG: Learned incomp not immediately applicable, continuing\n";
-              flush_all ();
+              debug_printf "DEBUG: Learned incomp not immediately applicable, continuing\n";
+              if !debug_enabled then flush_all ();
               process_incompatibilities repo new_state rest
             )
         | Error err ->
-            Printf.printf "DEBUG: conflict resolution failed\n";
-            flush_all ();
+            debug_printf "DEBUG: conflict resolution failed\n";
+            if !debug_enabled then flush_all ();
             Error err)
       else if incompatibility_almost_satisfied state.partial_solution incomp
       then (
-        Printf.printf
+        debug_printf
           "DEBUG: incomp %d is almost satisfied - unit propagation\n" incomp.id;
-        flush_all ();
+        if !debug_enabled then flush_all ();
         (* Unit propagation possible *)
         let unsatisfied_term =
           get_unsatisfied_term state.partial_solution incomp
@@ -335,7 +340,7 @@ and process_incompatibilities (repo : repository) state incomps :
                   id = state.next_id + 1;
                 }
               in
-              Error (NoSolution derived_incomp)
+              Error (NoSolution (derived_incomp, state.incompatibilities))
             else
               let new_assignment =
                 Derivation
@@ -347,8 +352,8 @@ and process_incompatibilities (repo : repository) state incomps :
               let new_state =
                 { state with partial_solution = new_partial_solution }
               in
-              Printf.printf "DEBUG: added positive derivation, continuing\n";
-              flush_all ();
+              debug_printf "DEBUG: added positive derivation, continuing\n";
+              if !debug_enabled then flush_all ();
               match process_incompatibilities repo new_state rest with
               | Ok (final_state, changed_pkg) -> Ok (final_state, changed_pkg)
               | Error err -> Error err)
@@ -363,19 +368,19 @@ and process_incompatibilities (repo : repository) state incomps :
             let new_state =
               { state with partial_solution = new_partial_solution }
             in
-            Printf.printf
+            debug_printf
               "DEBUG: added negative derivation: %s %s, continuing\n"
               (term_package negated_term)
               (if is_positive negated_term then "MUST" else "MUST NOT");
-            flush_all ();
+            if !debug_enabled then flush_all ();
             match process_incompatibilities repo new_state rest with
             | Ok (final_state, changed_pkg) -> Ok (final_state, changed_pkg)
             | Error err -> Error err))
       else (
-        Printf.printf
+        debug_printf
           "DEBUG: incomp %d not satisfied or almost satisfied, skipping\n"
           incomp.id;
-        flush_all ();
+        if !debug_enabled then flush_all ();
         match process_incompatibilities repo state rest with
         | Ok (final_state, changed_pkg) -> Ok (final_state, changed_pkg)
         | Error err -> Error err)
@@ -383,38 +388,38 @@ and process_incompatibilities (repo : repository) state incomps :
 (* Conflict Resolution Algorithm *)
 and conflict_resolution state conflicting_incomp :
     (solver_state * incompatibility) internal_result =
-  Printf.printf "DEBUG: Conflict resolution for incomp ID %d\n"
+  debug_printf "DEBUG: Conflict resolution for incomp ID %d\n"
     conflicting_incomp.id;
-  Printf.printf "  Terms in conflicting incomp:\n";
+  debug_printf "  Terms in conflicting incomp:\n";
   List.iter (fun t ->
-    Printf.printf "    %s %s [%s]\n" (term_package t)
+    debug_printf "    %s %s [%s]\n" (term_package t)
       (if is_positive t then "+" else "-")
       (String.concat "," (term_versions t))
   ) conflicting_incomp.terms;
-  flush_all ();
+  if !debug_enabled then flush_all ();
   
   let rec resolve_conflict incomp iterations =
-    Printf.printf "DEBUG: Resolving conflict iteration %d for incomp ID %d\n" iterations incomp.id;
+    debug_printf "DEBUG: Resolving conflict iteration %d for incomp ID %d\n" iterations incomp.id;
     
     (* Check if this is a root-level failure: empty terms or contains query packages *)
     if List.length incomp.terms = 0 then (
-      Printf.printf "DEBUG: Root-level failure - no solution\n";
-      Error (NoSolution incomp)
+      debug_printf "DEBUG: Root-level failure - no solution\n";
+      Error (NoSolution (incomp, state.incompatibilities))
     ) else (
       (* Find the earliest assignment that makes the incompatibility satisfied *)
       match find_earliest_satisfying_assignment state.partial_solution incomp with
       | None -> 
-          Printf.printf "DEBUG: No satisfying assignment found - no solution\n";
-          Error (NoSolution incomp)
+          debug_printf "DEBUG: No satisfying assignment found - no solution\n";
+          Error (NoSolution (incomp, state.incompatibilities))
       | Some (satisfier, satisfier_term) -> (
-          Printf.printf "DEBUG: Found satisfier for term %s\n" (term_package satisfier_term);
-          Printf.printf "  Satisfier type: %s\n" 
+          debug_printf "DEBUG: Found satisfier for term %s\n" (term_package satisfier_term);
+          debug_printf "  Satisfier type: %s\n" 
             (match satisfier with Decision _ -> "Decision" | Derivation _ -> "Derivation");
-          Printf.printf "  Satisfier level: %d\n" (get_assignment_level satisfier);
+          debug_printf "  Satisfier level: %d\n" (get_assignment_level satisfier);
           (* Find previous satisfier *)
           match find_previous_satisfier_for_incomp state.partial_solution incomp satisfier with
           | None ->
-              Printf.printf "DEBUG: No previous satisfier - backtracking to level 1\n";
+              debug_printf "DEBUG: No previous satisfier - backtracking to level 1\n";
               (* No previous satisfier - backtrack to decision level 1 *)
               let previous_satisfier_level = 1 in
               let new_assignments =
@@ -436,14 +441,14 @@ and conflict_resolution state conflicting_incomp :
                   next_id = state.next_id + 1;
                 }
               in
-              Printf.printf "DEBUG: Added learned incomp ID %d to state\n" incomp.id;
-              Printf.printf "  State now has %d incompatibilities\n" 
+              debug_printf "DEBUG: Added learned incomp ID %d to state\n" incomp.id;
+              debug_printf "  State now has %d incompatibilities\n" 
                 (List.length new_state.incompatibilities);
               Ok (new_state, incomp)
           | Some previous_satisfier ->
               let previous_satisfier_level = get_assignment_level previous_satisfier in
-              Printf.printf "DEBUG: Found previous satisfier at level %d\n" previous_satisfier_level;
-              Printf.printf "  Previous satisfier type: %s\n"
+              debug_printf "DEBUG: Found previous satisfier at level %d\n" previous_satisfier_level;
+              debug_printf "  Previous satisfier type: %s\n"
                 (match previous_satisfier with Decision _ -> "Decision" | Derivation _ -> "Derivation");
               
               (* Always derive the new incompatibility first *)
@@ -467,10 +472,10 @@ and conflict_resolution state conflicting_incomp :
                       
                       (* Remove duplicates *)
                       let unique_terms = List.sort_uniq compare merged_terms in
-                      Printf.printf "DEBUG: Deriving incomp from %d and %d\n" incomp.id cause_incomp.id;
-                      Printf.printf "  Merged terms:\n";
+                      debug_printf "DEBUG: Deriving incomp from %d and %d\n" incomp.id cause_incomp.id;
+                      debug_printf "  Merged terms:\n";
                       List.iter (fun t ->
-                        Printf.printf "    %s %s [%s]\n" (term_package t)
+                        debug_printf "    %s %s [%s]\n" (term_package t)
                           (if is_positive t then "+" else "-")
                           (String.concat "," (term_versions t))
                       ) unique_terms;
@@ -483,11 +488,11 @@ and conflict_resolution state conflicting_incomp :
               
               (* Check if we should backtrack or continue resolution *)
               if is_decision satisfier || (get_assignment_level satisfier) <> previous_satisfier_level then (
-                Printf.printf "DEBUG: Satisfier is decision or different level - backtracking\n";
-                Printf.printf "  is_decision satisfier: %b\n" (is_decision satisfier);
-                Printf.printf "  satisfier level: %d, previous level: %d\n" 
+                debug_printf "DEBUG: Satisfier is decision or different level - backtracking\n";
+                debug_printf "  is_decision satisfier: %b\n" (is_decision satisfier);
+                debug_printf "  satisfier level: %d, previous level: %d\n" 
                   (get_assignment_level satisfier) previous_satisfier_level;
-                Printf.printf "  Derived incomp ID %d with %d terms\n" 
+                debug_printf "  Derived incomp ID %d with %d terms\n" 
                   derived_incomp.id (List.length derived_incomp.terms);
                 (* Backtrack to previous satisfier level *)
                 let new_assignments =
@@ -509,19 +514,19 @@ and conflict_resolution state conflicting_incomp :
                     next_id = state.next_id + iterations + 1;
                   }
                 in
-                Printf.printf "DEBUG: Added learned incomp ID %d to state\n" derived_incomp.id;
-                Printf.printf "  State now has %d incompatibilities\n" 
+                debug_printf "DEBUG: Added learned incomp ID %d to state\n" derived_incomp.id;
+                debug_printf "  State now has %d incompatibilities\n" 
                   (List.length new_state.incompatibilities);
                 Ok (new_state, derived_incomp)
               ) else (
                 (* Continue resolution with the derived incompatibility *)
-                Printf.printf "DEBUG: Continuing resolution - recursing with derived incomp\n";
-                Printf.printf "DEBUG: Created prior cause ID %d with %d terms\n" 
+                debug_printf "DEBUG: Continuing resolution - recursing with derived incomp\n";
+                debug_printf "DEBUG: Created prior cause ID %d with %d terms\n" 
                   derived_incomp.id (List.length derived_incomp.terms);
                 
                 if iterations > 50 then (
-                  Printf.printf "DEBUG: Hit iteration limit in conflict resolution\n";
-                  Error (NoSolution derived_incomp)
+                  debug_printf "DEBUG: Hit iteration limit in conflict resolution\n";
+                  Error (NoSolution (derived_incomp, state.incompatibilities))
                 ) else (
                   resolve_conflict derived_incomp (iterations + 1)
                 )
@@ -615,25 +620,25 @@ and compute_term_difference satisfier_term target_term =
     Some satisfier_term
 
 and create_prior_cause incomp satisfier satisfier_term next_id =
-  Printf.printf "DEBUG: create_prior_cause called:\n";
-  Printf.printf "  incomp ID %d with %d terms\n" incomp.id
+  debug_printf "DEBUG: create_prior_cause called:\n";
+  debug_printf "  incomp ID %d with %d terms\n" incomp.id
     (List.length incomp.terms);
-  Printf.printf "  satisfier_term: %s %s\n"
+  debug_printf "  satisfier_term: %s %s\n"
     (term_package satisfier_term)
     (if is_positive satisfier_term then "+" else "-");
-  flush_all ();
+  if !debug_enabled then flush_all ();
 
   (* Create prior cause by applying resolution between incomp and satisfier's cause *)
   match satisfier with
   | Decision _ ->
-      Printf.printf "  satisfier is Decision, returning original incomp\n";
-      flush_all ();
+      debug_printf "  satisfier is Decision, returning original incomp\n";
+      if !debug_enabled then flush_all ();
       (* No cause to resolve with - this shouldn't happen in proper conflict resolution *)
       incomp
   | Derivation (satisfier_assignment_term, cause_incomp, _) ->
-      Printf.printf "  satisfier is Derivation from incomp ID %d\n"
+      debug_printf "  satisfier is Derivation from incomp ID %d\n"
         cause_incomp.id;
-      flush_all ();
+      if !debug_enabled then flush_all ();
       (* Union of terms from incomp and cause_incomp, minus terms referring to satisfier's package *)
       let satisfier_package = term_package satisfier_term in
       let incomp_terms =
@@ -668,14 +673,14 @@ and create_prior_cause incomp satisfier satisfier_term next_id =
           id = next_id;
         }
       in
-      Printf.printf "  created prior_cause ID %d with %d terms\n" result.id
+      debug_printf "  created prior_cause ID %d with %d terms\n" result.id
         (List.length result.terms);
       List.iter
         (fun t ->
-          Printf.printf "    %s %s\n" (term_package t)
+          debug_printf "    %s %s\n" (term_package t)
             (if is_positive t then "+" else "-"))
         result.terms;
-      flush_all ();
+      if !debug_enabled then flush_all ();
       result
 
 and get_assignment_level = function
@@ -718,51 +723,51 @@ let rec format_tree = function
 
 let explain_incompatibility root_incomp =
   let tree = explain_incompatibility_tree root_incomp in
-  
-  (* Special handling for long chain conflicts *)
-  let all_causes = 
-    let rec collect = function
-      | `Leaf s -> [s]
-      | `Node (t1, t2) -> collect t1 @ collect t2
-    in
-    collect tree
-  in
-  
-  (* Look for the key conflict *)
-  let h1_deps = List.filter (fun s -> String.contains s 'H' && String.contains s '1') all_causes in
-  let h2_deps = List.filter (fun s -> String.contains s 'H' && String.contains s '2') all_causes in
-  
-  match (h1_deps, h2_deps) with
-  | (h1::_, h2::_) when h1 <> h2 ->
-      (* Found the H version conflict *)
-      let deps_chain = List.filter (fun s -> not (List.mem s [h1; h2])) all_causes in
-      let chain_str = String.concat ", " (List.rev deps_chain) in
-      Printf.sprintf "The dependency chain %s leads to a conflict:\n  %s\n  %s\n\nThese requirements are incompatible." 
-        chain_str h1 h2
-  | _ ->
-      (* Fall back to simple formatting *)
-      format_tree tree
+  format_tree tree
 
-let explain_failure root_incompatibility =
+let explain_failure root_incompatibility all_incompatibilities =
   (* Try to provide more context for common patterns *)
   let basic_explanation = explain_incompatibility root_incompatibility in
 
-  (* Check if this looks like a dependency conflict and add context *)
-  match root_incompatibility.cause with
-  | Derived (cause1, cause2) -> (
-      match (cause1.cause, cause2.cause) with
-      | ( External (Dependency (depender1, _, _)),
-          External (Dependency (depender2, _, _)) ) ->
-          Printf.sprintf
-            "Version solving failed:\n\n\
-             Both %s %s and %s %s are needed, but %s\n\n\
-             Therefore, no solution exists."
-            (fst depender1) (snd depender1) (fst depender2) (snd depender2)
-            basic_explanation
-      | _ ->
-          Printf.sprintf
-            "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
-            basic_explanation)
+  (* Find who depends on a package by looking through all incompatibilities *)
+  let find_who_needs pkg_name =
+    List.filter_map (fun incomp ->
+      match incomp.cause with
+      | External (Dependency ((dep_name, dep_ver), (target, _), _)) 
+        when target = pkg_name ->
+          Some (dep_name, dep_ver)
+      | _ -> None
+    ) all_incompatibilities
+  in
+
+  (* For simple conflicts, try to explain why packages are needed *)
+  match root_incompatibility.terms with
+  | [Positive (pkg1, [v1]); Positive (pkg2, [v2])] ->
+      (* Two packages are in conflict - likely both required by something *)
+      let who_needs_1 = find_who_needs pkg1 in
+      let who_needs_2 = find_who_needs pkg2 in
+      
+      let context = match (who_needs_1, who_needs_2) with
+        | ([(dep1, ver1)], [(dep2, ver2)]) when dep1 = dep2 && ver1 = ver2 ->
+            Printf.sprintf " (both required by %s %s)" dep1 ver1
+        | (deps1, deps2) when deps1 <> [] || deps2 <> [] ->
+            let format_deps deps pkg = 
+              match deps with
+              | [] -> ""
+              | _ -> 
+                  let dep_strs = List.map (fun (n, v) -> Printf.sprintf "%s %s" n v) deps in
+                  Printf.sprintf "%s required by %s" pkg (String.concat ", " dep_strs)
+            in
+            let parts = List.filter ((<>) "") [format_deps who_needs_1 (pkg1 ^ " " ^ v1); 
+                                                format_deps who_needs_2 (pkg2 ^ " " ^ v2)] in
+            if parts = [] then "" else " (" ^ String.concat "; " parts ^ ")"
+        | _ -> ""
+      in
+      Printf.sprintf
+        "Version solving failed:\n\
+         %s %s and %s %s are both required%s, but their dependencies conflict:\n\
+         %s"
+        pkg1 v1 pkg2 v2 context basic_explanation
   | _ ->
       Printf.sprintf
         "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
@@ -847,10 +852,10 @@ let solve (repo : repository) (deps : dependencies) (query : query) :
 
   let rec solve_loop state next_package : solve_result =
     incr solve_iterations;
-    Printf.printf "DEBUG: Solve iteration %d, next_package: %s\n"
+    debug_printf "DEBUG: Solve iteration %d, next_package: %s\n"
       !solve_iterations next_package;
     if !solve_iterations > 200 then (
-      Printf.printf "DEBUG: Solve hit iteration limit\n";
+      debug_printf "DEBUG: Solve hit iteration limit\n";
       Error (InvalidInput "Solve iteration limit reached"))
     else
       (* Unit propagation *)
@@ -873,15 +878,15 @@ let solve (repo : repository) (deps : dependencies) (query : query) :
   in
 
   (* Start with root package from query *)
-  Printf.printf "DEBUG: Starting solve with query length %d\n"
+  debug_printf "DEBUG: Starting solve with query length %d\n"
     (List.length query);
-  flush_all ();
+  if !debug_enabled then flush_all ();
   match query with
   | [] ->
-      Printf.printf "DEBUG: Empty query, returning empty solution\n";
-      flush_all ();
+      debug_printf "DEBUG: Empty query, returning empty solution\n";
+      if !debug_enabled then flush_all ();
       Solution []
   | (name, _) :: _ ->
-      Printf.printf "DEBUG: Starting solve_loop with package %s\n" name;
-      flush_all ();
+      debug_printf "DEBUG: Starting solve_loop with package %s\n" name;
+      if !debug_enabled then flush_all ();
       solve_loop initial_state name
