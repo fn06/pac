@@ -397,12 +397,16 @@ and find_earliest_satisfying_assignment partial_solution incomp =
           }
         in
         if incompatibility_satisfied test_partial incomp then
-          (* Find which term this assignment satisfies *)
-          let assignment_packages = get_assignment_packages assignment in
-          let satisfied_term =
-            List.find (packages_satisfy_term assignment_packages) incomp.terms
+          (* Find the term in incompatibility that refers to the same package as satisfier *)
+          let satisfier_package =
+            match assignment with
+            | Decision ((name, _), _) -> name
+            | Derivation (term, _, _) -> term_package term
           in
-          Some (assignment, satisfied_term)
+          let same_package_term =
+            List.find (fun t -> term_package t = satisfier_package) incomp.terms
+          in
+          Some (assignment, same_package_term)
         else check_assignments (prefix_assignments @ [ assignment ]) rest
   in
   (* Assignments are in reverse chronological order, so reverse to get chronological *)
@@ -439,13 +443,38 @@ and find_previous_satisfier_for_incomp partial_solution incomp satisfier =
 
 and is_decision = function Decision _ -> true | Derivation _ -> false
 
+and assignment_satisfies_term assignment term =
+  (* Check if an assignment satisfies a specific term *)
+  let assignment_packages = get_assignment_packages assignment in
+  packages_satisfy_term assignment_packages term
+
+and compute_term_difference satisfier_term target_term =
+  (* Compute satisfier_term \ target_term (set difference) *)
+  (* This is a simplified version - in a full implementation this would handle version ranges *)
+  if term_package satisfier_term = term_package target_term then
+    (* Same package - check if versions overlap *)
+    let satisfier_versions = term_versions satisfier_term in
+    let target_versions = term_versions target_term in
+    let difference_versions =
+      List.filter (fun v -> not (List.mem v target_versions)) satisfier_versions
+    in
+    if List.length difference_versions > 0 then
+      Some
+        (match satisfier_term with
+        | Positive (name, _) -> Positive (name, difference_versions)
+        | Negative (name, _) -> Negative (name, difference_versions))
+    else None
+  else
+    (* Different packages - no overlap *)
+    Some satisfier_term
+
 and create_prior_cause incomp satisfier satisfier_term next_id =
   (* Create prior cause by applying resolution between incomp and satisfier's cause *)
   match satisfier with
   | Decision _ ->
       (* No cause to resolve with - this shouldn't happen in proper conflict resolution *)
       incomp
-  | Derivation (_, cause_incomp, _) ->
+  | Derivation (satisfier_assignment_term, cause_incomp, _) ->
       (* Union of terms from incomp and cause_incomp, minus terms referring to satisfier's package *)
       let satisfier_package = term_package satisfier_term in
       let incomp_terms =
@@ -457,8 +486,22 @@ and create_prior_cause incomp satisfier satisfier_term next_id =
           cause_incomp.terms
       in
       let merged_terms = incomp_terms @ cause_terms in
+
+      (* Check if satisfier doesn't satisfy term - if so, add not (satisfier \ term) *)
+      let final_terms =
+        if not (assignment_satisfies_term satisfier satisfier_term) then
+          (* Add not (satisfier \ term) to priorCause *)
+          let satisfier_difference =
+            compute_term_difference satisfier_assignment_term satisfier_term
+          in
+          match satisfier_difference with
+          | None -> merged_terms (* No difference to add *)
+          | Some diff_term -> negate_term diff_term :: merged_terms
+        else merged_terms
+      in
+
       (* Remove duplicates *)
-      let unique_terms = List.sort_uniq compare merged_terms in
+      let unique_terms = List.sort_uniq compare final_terms in
       {
         terms = unique_terms;
         cause = Derived (incomp, cause_incomp);
