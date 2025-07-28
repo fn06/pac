@@ -13,9 +13,6 @@
  (name test_pathological)
  (libraries pac))
 
-(executable
- (name demo_error_reporting)
- (libraries pac))
 
 (executable
  (name analyze_missing)

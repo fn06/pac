@@ -13,8 +13,13 @@ type term =
   | Negative of name * version list (* package name with forbidden versions *)
 
 (* Incompatibility cause tracking for error reporting *)
+type external_cause =
+  | Dependency of package * package * string list (* depender depends on target with versions *)
+  | Unavailable of package (* package version not available *)
+  | Custom of string (* custom constraint *)
+
 type cause =
-  | External of string (* External fact like "A depends on B" *)
+  | External of external_cause (* External fact with structured data *)
   | Derived of
       incompatibility
       * incompatibility (* Derived from two other incompatibilities *)
@@ -169,11 +174,7 @@ let dependency_to_incompatibility id (depender, (target_name, target_versions))
         Negative (target_name, target_versions)
         (* Then target must NOT be these versions *);
       ];
-    cause =
-      External
-        (Printf.sprintf "%s %s depends on %s (%s)" (fst depender) (snd depender)
-           target_name
-           (String.concat " " target_versions));
+    cause = External (Dependency (depender, (target_name, ""), target_versions));
     id;
   }
 
@@ -266,8 +267,18 @@ and process_incompatibilities (repo : repository) state incomps :
                 versions
             in
             if List.length available_versions = 0 then
-              (* This is a fundamental failure - the required package doesn't exist *)
-              Error (NoSolution incomp)
+              (* Create incompatibilities showing the full chain: dependency + unavailability *)
+              let unavailable_incomp = {
+                terms = [Positive (name, versions)];
+                cause = External (Unavailable (name, String.concat " or " versions));
+                id = state.next_id;
+              } in
+              let derived_incomp = {
+                terms = List.filter (fun t -> term_package t <> name) incomp.terms;
+                cause = Derived (incomp, unavailable_incomp);
+                id = state.next_id + 1;
+              } in
+              Error (NoSolution derived_incomp)
             else
               let new_assignment =
                 Derivation
@@ -298,15 +309,8 @@ and process_incompatibilities (repo : repository) state incomps :
 and conflict_resolution state conflicting_incomp : solver_state internal_result
     =
   let rec resolve_conflict incomp =
-    (* Check if this is a root-level failure *)
-    if
-      List.length incomp.terms = 0
-      || List.length incomp.terms = 1
-         &&
-         match List.hd incomp.terms with
-         | Positive (_, _) -> true (* Root package can't be selected *)
-         | _ -> false
-    then Error (NoSolution incomp)
+    (* Check if this is a root-level failure: empty terms or contains query packages *)
+    if List.length incomp.terms = 0 then Error (NoSolution incomp)
     else
       (* Find the earliest assignment that makes the incompatibility satisfied *)
       match
@@ -519,10 +523,18 @@ and get_assignment_packages = function
   | Derivation (Negative _, _, _) -> []
 
 (* Error reporting functions *)
+let format_external_cause = function
+  | Dependency ((dep_name, dep_version), (target_name, _), target_versions) ->
+      Printf.sprintf "%s %s depends on %s %s" 
+        dep_name dep_version target_name (String.concat " or " target_versions)
+  | Unavailable (pkg_name, pkg_version) ->
+      Printf.sprintf "%s %s is not available" pkg_name pkg_version
+  | Custom msg -> msg
+
 let rec explain_incompatibility incomp depth =
   let indent = String.make (depth * 2) ' ' in
   match incomp.cause with
-  | External msg -> Printf.sprintf "%s%s" indent msg
+  | External ext_cause -> Printf.sprintf "%s%s" indent (format_external_cause ext_cause)
   | Derived (cause1, cause2) -> (
       let format_term term =
         let package = term_package term in
@@ -540,9 +552,9 @@ let rec explain_incompatibility incomp depth =
 
       (* Check if this is a simple two-cause derivation for better formatting *)
       match (cause1.cause, cause2.cause) with
-      | External msg1, External msg2 ->
+      | External ext1, External ext2 ->
           Printf.sprintf "%sBecause %s is impossible:\n%s  - %s\n%s  - %s"
-            indent terms_str indent msg1 indent msg2
+            indent terms_str indent (format_external_cause ext1) indent (format_external_cause ext2)
       | _ ->
           Printf.sprintf "%sBecause %s:\n%s\n%sand\n%s" indent terms_str
             (explain_incompatibility cause1 (depth + 1))
@@ -550,8 +562,7 @@ let rec explain_incompatibility incomp depth =
             (explain_incompatibility cause2 (depth + 1)))
 
 let explain_failure root_incompatibility =
-  Printf.sprintf
-    "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
+  Printf.sprintf "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
     (explain_incompatibility root_incompatibility 0)
 
 (* Helper function to check if package has decision *)
