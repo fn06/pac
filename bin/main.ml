@@ -79,9 +79,27 @@ let check_cmd filename query_str resolution_str granularity calculus () =
       Printf.printf "\tDependency closure: %b\n" dep_closure;
       Printf.printf "\tVersion granularity: %b\n" version_granularity;
       Printf.printf "\tValid concurrent resolution: %b\n" concurrent_resolution
+  | "pubgrub" -> (
+      (* Use PubGrub solver *)
+      match Pubgrub.solve deps query with
+      | Pubgrub.Solution solution ->
+          Printf.printf "PubGrub resolution:\n";
+          Printf.printf "\tSolution found: %s\n"
+            (String.concat ", " (List.map string_of_package solution));
+          Printf.printf "\tMatches provided resolution: %b\n"
+            (List.for_all (fun pkg -> List.mem pkg solution) resolution
+            && List.for_all (fun pkg -> List.mem pkg resolution) solution)
+      | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
+          Printf.printf "PubGrub resolution:\n";
+          Printf.printf "\tNo solution exists (incompatibility id: %d)\n"
+            incomp.id
+      | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
+          Printf.printf "PubGrub resolution:\n";
+          Printf.printf "\tInvalid input: %s\n" msg)
   | _ ->
       failwith
-        (Printf.sprintf "Unknown calculus: %s (expected 'core' or 'concurrent')"
+        (Printf.sprintf
+           "Unknown calculus: %s (expected 'core', 'concurrent', or 'pubgrub')"
            calculus)
 
 let reduce_cmd filename granularity from_calculus to_calculus () =
@@ -212,6 +230,10 @@ let default_info =
           ( "concurrent",
             "Concurrent Package Calculus - Enhanced dependency resolution with \
              granular version constraints" );
+        `I
+          ( "pubgrub",
+            "PubGrub Algorithm - Advanced dependency resolution with \
+             conflict-driven learning" );
         `S Manpage.s_examples;
         `P "Parse a dependency file:";
         `P "  $(mname) parse -f deps.txt";
@@ -221,6 +243,42 @@ let default_info =
         `P
           "  $(mname) check -f deps.txt -q 'A 1.0.0' -r 'A 1.0.0,B 1.0.0,C \
            1.0.0' -c core";
+        `P "Solve dependencies using PubGrub:";
+        `P "  $(mname) solve -f deps.txt -q 'A 1.0.0'";
+      ]
+
+let solve_cmd filename query_str () =
+  let ast_deps = process_file filename in
+  let deps = of_ast_expression ast_deps in
+  let query = List.map parse_package (String.split_on_char ',' query_str) in
+
+  Printf.printf "Query: %s\n"
+    (String.concat ", " (List.map string_of_package query));
+
+  match Pubgrub.solve deps query with
+  | Pubgrub.Solution solution ->
+      Printf.printf "Solution found:\n";
+      List.iter
+        (fun (name, version) -> Printf.printf "  %s %s\n" name version)
+        solution
+  | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
+      Printf.printf "No solution exists (incompatibility id: %d)\n" incomp.id
+  | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
+      Printf.printf "Invalid input: %s\n" msg
+
+let solve_term = Term.(const solve_cmd $ file_arg $ query_arg $ const ())
+
+let solve_info =
+  Cmd.info "solve" ~doc:"Solve dependencies using PubGrub algorithm"
+    ~man:
+      [
+        `S Manpage.s_description;
+        `P
+          "Uses the PubGrub algorithm to find a valid resolution for the given \
+           dependencies and query.";
+        `P
+          "This command finds a solution automatically without requiring a \
+           pre-computed resolution.";
       ]
 
 let () =
@@ -229,6 +287,7 @@ let () =
       Cmd.v parse_info parse_term;
       Cmd.v reduce_info reduce_term;
       Cmd.v check_info check_term;
+      Cmd.v solve_info solve_term;
     ]
   in
   let cmd = Cmd.group default_info cmds in

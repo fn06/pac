@@ -1,0 +1,419 @@
+(* Core types from the Package Calculus *)
+type name = string
+type version = string
+type package = name * version
+type dependency = package * (name * version list)
+type dependencies = dependency list
+type query = package list
+
+(* Term represents a statement about a package that may be true or false *)
+type term =
+  | Positive of name * version list (* package name with allowed versions *)
+  | Negative of name * version list (* package name with forbidden versions *)
+
+(* Incompatibility cause tracking for error reporting *)
+type cause =
+  | External of string (* External fact like "A depends on B" *)
+  | Derived of
+      incompatibility
+      * incompatibility (* Derived from two other incompatibilities *)
+
+(* Incompatibility is a set of terms that cannot all be true *)
+and incompatibility = {
+  terms : term list;
+  cause : cause;
+  id : int; (* Unique identifier for tracking *)
+}
+
+(* Assignment types in partial solution *)
+type assignment =
+  | Decision of package * int (* (package, decision_level) *)
+  | Derivation of
+      term * incompatibility * int (* (term, cause, decision_level) *)
+
+(* Partial solution maintains current state *)
+type partial_solution = { assignments : assignment list; decision_level : int }
+
+(* PubGrub solver state *)
+type solver_state = {
+  incompatibilities : incompatibility list;
+  partial_solution : partial_solution;
+  next_id : int;
+}
+
+(* Error types *)
+type solve_error =
+  | NoSolution of incompatibility (* Root cause incompatibility *)
+  | InvalidInput of string
+
+type solve_result = Solution of package list | Error of solve_error
+
+(* Internal result type for intermediate operations *)
+type 'a internal_result = Ok of 'a | Error of solve_error
+
+(* Helper functions for terms *)
+let term_package = function
+  | Positive (name, _) -> name
+  | Negative (name, _) -> name
+
+let term_versions = function
+  | Positive (_, versions) -> versions
+  | Negative (_, versions) -> versions
+
+let is_positive = function Positive _ -> true | Negative _ -> false
+
+let negate_term = function
+  | Positive (name, versions) -> Negative (name, versions)
+  | Negative (name, versions) -> Positive (name, versions)
+
+(* Check if a package satisfies a term *)
+let package_satisfies_term (pkg_name, pkg_version) = function
+  | Positive (name, versions) ->
+      name = pkg_name && List.mem pkg_version versions
+  | Negative (name, versions) ->
+      name = pkg_name && not (List.mem pkg_version versions)
+
+(* Check if a set of packages satisfies a term *)
+let packages_satisfy_term packages term =
+  List.exists (fun pkg -> package_satisfies_term pkg term) packages
+
+(* Check if a set of packages contradicts a term *)
+let packages_contradict_term packages term =
+  packages_satisfy_term packages (negate_term term)
+
+(* Get all packages currently assigned in partial solution *)
+let get_assigned_packages partial_solution =
+  List.fold_left
+    (fun acc -> function
+      | Decision (pkg, _) -> pkg :: acc
+      | Derivation (Positive (name, versions), _, _) -> (
+          (* For positive derivations, we need to find which specific version was chosen *)
+          (* For now, just take the first version as a simplification *)
+          match versions with
+          | [] -> acc
+          | v :: _ -> (name, v) :: acc)
+      | Derivation (Negative _, _, _) -> acc)
+    [] partial_solution.assignments
+
+(* Check if term is satisfied by current partial solution *)
+let term_satisfied_by_partial_solution term partial_solution =
+  let packages = get_assigned_packages partial_solution in
+  packages_satisfy_term packages term
+
+(* Check if term is contradicted by current partial solution *)
+let term_contradicted_by_partial_solution term partial_solution =
+  let packages = get_assigned_packages partial_solution in
+  packages_contradict_term packages term
+
+(* Check if incompatibility is satisfied by partial solution *)
+let incompatibility_satisfied partial_solution incomp =
+  List.for_all
+    (fun term -> term_satisfied_by_partial_solution term partial_solution)
+    incomp.terms
+
+(* Check if incompatibility is almost satisfied (all but one term satisfied) *)
+let incompatibility_almost_satisfied partial_solution incomp =
+  let satisfied_terms =
+    List.filter
+      (fun term -> term_satisfied_by_partial_solution term partial_solution)
+      incomp.terms
+  in
+  let unsatisfied_terms =
+    List.filter
+      (fun t ->
+        (not (term_satisfied_by_partial_solution t partial_solution))
+        && not (term_contradicted_by_partial_solution t partial_solution))
+      incomp.terms
+  in
+  List.length satisfied_terms = List.length incomp.terms - 1
+  && List.length unsatisfied_terms = 1
+
+(* Get the unsatisfied term from an almost-satisfied incompatibility *)
+let get_unsatisfied_term partial_solution incomp =
+  List.find
+    (fun t ->
+      (not (term_satisfied_by_partial_solution t partial_solution))
+      && not (term_contradicted_by_partial_solution t partial_solution))
+    incomp.terms
+
+(* Add assignment to partial solution *)
+let add_assignment assignment partial_solution =
+  {
+    partial_solution with
+    assignments = assignment :: partial_solution.assignments;
+  }
+
+(* Get packages mentioned in a term *)
+let term_packages = function
+  | Positive (name, _) | Negative (name, _) -> [ name ]
+
+(* Get all packages mentioned in incompatibility *)
+let incompatibility_packages incomp =
+  List.concat_map term_packages incomp.terms |> List.sort_uniq String.compare
+
+(* Convert Core dependencies to PubGrub incompatibilities *)
+let dependency_to_incompatibility id (depender, (target_name, target_versions))
+    =
+  {
+    terms =
+      [
+        Positive (fst depender, [ snd depender ]);
+        (* If this package is selected *)
+        Negative (target_name, target_versions)
+        (* Then target must NOT be these versions *);
+      ];
+    cause =
+      External
+        (Printf.sprintf "%s %s depends on %s (%s)" (fst depender) (snd depender)
+           target_name
+           (String.concat " " target_versions));
+    id;
+  }
+
+(* Convert Core dependencies to incompatibilities *)
+let dependencies_to_incompatibilities (deps : dependencies) =
+  let rec convert acc id = function
+    | [] -> List.rev acc
+    | dep :: rest ->
+        let incomp = dependency_to_incompatibility id dep in
+        convert (incomp :: acc) (id + 1) rest
+  in
+  convert [] 0 deps
+
+(* Create initial solver state *)
+let create_initial_state (deps : dependencies) (query : query) =
+  let dep_incomps = dependencies_to_incompatibilities deps in
+  let next_id = List.length dep_incomps in
+
+  (* Add query requirements by starting with them in the partial solution *)
+  let query_assignments = List.map (fun (name, version) ->
+    Decision ((name, version), 0)
+  ) query in
+  
+  let initial_partial_solution = {
+    assignments = query_assignments;
+    decision_level = 0;
+  } in
+
+  {
+    incompatibilities = dep_incomps;
+    partial_solution = initial_partial_solution;
+    next_id = next_id;
+  }
+
+(* Unit Propagation Algorithm *)
+let rec unit_propagation state package_names : solver_state internal_result =
+  match package_names with
+  | [] -> Ok state
+  | package_name :: rest -> (
+      let relevant_incomps =
+        List.filter
+          (fun incomp ->
+            List.mem package_name (incompatibility_packages incomp))
+          state.incompatibilities
+      in
+
+      match process_incompatibilities state relevant_incomps with
+      | Ok new_state ->
+          let changed_packages =
+            if new_state != state then [ package_name ] else []
+          in
+          unit_propagation new_state (rest @ changed_packages)
+      | Error err -> Error err)
+
+and process_incompatibilities state incomps : solver_state internal_result =
+  match incomps with
+  | [] -> Ok state
+  | incomp :: rest ->
+      if incompatibility_satisfied state.partial_solution incomp then
+        (* Conflict detected - need conflict resolution *)
+        match conflict_resolution state incomp with
+        | Ok new_state ->
+            Ok new_state (* Continue with learned incompatibility *)
+        | Error err -> Error err
+      else if incompatibility_almost_satisfied state.partial_solution incomp
+      then
+        (* Unit propagation possible *)
+        let unsatisfied_term =
+          get_unsatisfied_term state.partial_solution incomp
+        in
+        let negated_term = negate_term unsatisfied_term in
+        let new_assignment =
+          Derivation
+            (negated_term, incomp, state.partial_solution.decision_level)
+        in
+        let new_partial_solution =
+          add_assignment new_assignment state.partial_solution
+        in
+        let new_state =
+          { state with partial_solution = new_partial_solution }
+        in
+        process_incompatibilities new_state rest
+      else process_incompatibilities state rest
+
+(* Conflict Resolution Algorithm *)
+and conflict_resolution state conflicting_incomp : solver_state internal_result
+    =
+  let resolve_conflict incomp =
+    (* Check if this is a root-level failure *)
+    if
+      List.length incomp.terms = 0
+      || List.length incomp.terms = 1
+         &&
+         match List.hd incomp.terms with Positive (_, _) -> true | _ -> false
+    then Error (NoSolution incomp)
+    else
+      (* Find the satisfying assignment *)
+      match find_satisfying_assignment state.partial_solution incomp with
+      | None -> Error (NoSolution incomp)
+      | Some (satisfier, satisfier_level) ->
+          (* Simple backtracking - remove assignments above satisfier level *)
+          let new_assignments =
+            List.filter
+              (fun assignment ->
+                get_assignment_level assignment <= satisfier_level)
+              state.partial_solution.assignments
+          in
+          let new_partial_solution =
+            { assignments = new_assignments; decision_level = satisfier_level }
+          in
+          let new_incomp = derive_incompatibility incomp satisfier in
+          let new_state =
+            {
+              incompatibilities = new_incomp :: state.incompatibilities;
+              partial_solution = new_partial_solution;
+              next_id = state.next_id + 1;
+            }
+          in
+          Ok new_state
+  in
+  resolve_conflict conflicting_incomp
+
+and find_satisfying_assignment partial_solution incomp =
+  (* Find the earliest assignment that satisfies the incompatibility *)
+  let rec find_earliest best_assignment = function
+    | [] -> best_assignment
+    | assignment :: rest ->
+        let assignment_packages = get_assignment_packages assignment in
+        if List.exists (packages_satisfy_term assignment_packages) incomp.terms
+        then
+          let level = get_assignment_level assignment in
+          match best_assignment with
+          | None -> find_earliest (Some (assignment, level)) rest
+          | Some (_, best_level) when level < best_level ->
+              find_earliest (Some (assignment, level)) rest
+          | Some _ -> find_earliest best_assignment rest
+        else find_earliest best_assignment rest
+  in
+  find_earliest None partial_solution.assignments
+
+and get_assignment_level = function
+  | Decision (_, level) -> level
+  | Derivation (_, _, level) -> level
+
+and get_assignment_packages = function
+  | Decision (pkg, _) -> [ pkg ]
+  | Derivation (Positive (name, versions), _, _) -> (
+      match versions with [] -> [] | v :: _ -> [ (name, v) ])
+  | Derivation (Negative _, _, _) -> []
+
+and derive_incompatibility original_incomp _satisfier =
+  (* Simplified derivation - in full implementation this would use resolution *)
+  {
+    original_incomp with
+    id = original_incomp.id + 1000;
+    (* Temporary ID scheme *)
+    cause = Derived (original_incomp, original_incomp);
+  }
+
+(* Helper function to check if package has decision *)
+let has_decision_for_package package_name partial_solution =
+  List.exists
+    (function Decision ((name, _), _) -> name = package_name | _ -> false)
+    partial_solution.assignments
+
+(* Decision Making Algorithm *)
+let make_decision state =
+  (* Find a package that has positive derivations but no decision *)
+  let rec find_undecided_package = function
+    | [] -> None
+    | assignment :: rest -> (
+        match assignment with
+        | Derivation (Positive (name, versions), _, _) ->
+            if has_decision_for_package name state.partial_solution then
+              find_undecided_package rest
+            else Some (name, versions)
+        | _ -> find_undecided_package rest)
+  in
+
+  match find_undecided_package state.partial_solution.assignments with
+  | None -> None (* No more decisions needed *)
+  | Some (package_name, available_versions) -> (
+      (* Choose first available version (simplified heuristic) *)
+      match available_versions with
+      | [] -> None
+      | version :: _ ->
+          let new_decision_level = state.partial_solution.decision_level + 1 in
+          let new_assignment =
+            Decision ((package_name, version), new_decision_level)
+          in
+          let new_partial_solution =
+            add_assignment new_assignment state.partial_solution
+          in
+          let new_partial_solution =
+            { new_partial_solution with decision_level = new_decision_level }
+          in
+          Some { state with partial_solution = new_partial_solution })
+
+(* Check if we have a complete solution *)
+let is_complete_solution state =
+  (* Check if all positive derivations have corresponding decisions *)
+  let positive_derivations =
+    List.filter_map
+      (function
+        | Derivation (Positive (name, _), _, _) -> Some name | _ -> None)
+      state.partial_solution.assignments
+  in
+
+  let decisions =
+    List.filter_map
+      (function Decision ((name, _), _) -> Some name | _ -> None)
+      state.partial_solution.assignments
+  in
+
+  List.for_all (fun name -> List.mem name decisions) positive_derivations
+
+(* Extract solution from final state *)
+let extract_solution state =
+  List.filter_map
+    (function Decision (pkg, _) -> Some pkg | _ -> None)
+    state.partial_solution.assignments
+
+(* Main PubGrub solve function *)
+let solve (deps : dependencies) (query : query) : solve_result =
+  let initial_state = create_initial_state deps query in
+
+  let rec solve_loop state next_package : solve_result =
+    (* Unit propagation *)
+    match unit_propagation state [ next_package ] with
+    | Error err -> Error err
+    | Ok new_state -> (
+        if is_complete_solution new_state then
+          Solution (extract_solution new_state)
+        else
+          (* Decision making *)
+          match make_decision new_state with
+          | None ->
+              Solution (extract_solution new_state)
+              (* No more decisions needed *)
+          | Some newer_state -> (
+              (* Get the package name from the most recent decision *)
+              match newer_state.partial_solution.assignments with
+              | Decision ((name, _), _) :: _ -> solve_loop newer_state name
+              | _ -> Error (InvalidInput "Invalid state after decision")))
+  in
+
+  (* Start with root package from query *)
+  match query with
+  | [] -> Solution []
+  | (name, _) :: _ -> solve_loop initial_state name

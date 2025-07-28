@@ -1,6 +1,7 @@
 module Ast = Ast
 module Parser = Parser
 module Lexer = Lexer
+module Pubgrub = Pubgrub
 
 module Core = struct
   type 'a set = 'a list
