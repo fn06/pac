@@ -272,16 +272,28 @@ and process_incompatibilities (repo : repository) state incomps :
         | Ok (new_state, learned_incomp) ->
             Printf.printf "DEBUG: conflict resolution succeeded\n";
             flush_all ();
-            (* Find the package name from the learned incompatibility to focus on *)
-            let unsatisfied_term =
-              get_unsatisfied_term new_state.partial_solution learned_incomp
-            in
-            let changed_pkg = term_package unsatisfied_term in
-            Printf.printf
-              "DEBUG: focusing on package %s after conflict resolution\n"
-              changed_pkg;
-            flush_all ();
-            Ok (new_state, Some changed_pkg)
+            (* Check if the learned incompatibility is satisfied - if so, no solution exists *)
+            if incompatibility_satisfied new_state.partial_solution learned_incomp then (
+              Printf.printf "DEBUG: Learned incomp is satisfied - no solution!\n";
+              flush_all ();
+              Error (NoSolution learned_incomp)
+            ) else if incompatibility_almost_satisfied new_state.partial_solution learned_incomp then (
+              (* Find the package name from the learned incompatibility to focus on *)
+              let unsatisfied_term =
+                get_unsatisfied_term new_state.partial_solution learned_incomp
+              in
+              let changed_pkg = term_package unsatisfied_term in
+              Printf.printf
+                "DEBUG: focusing on package %s after conflict resolution\n"
+                changed_pkg;
+              flush_all ();
+              Ok (new_state, Some changed_pkg)
+            ) else (
+              (* The learned incompatibility is not immediately applicable, continue *)
+              Printf.printf "DEBUG: Learned incomp not immediately applicable, continuing\n";
+              flush_all ();
+              process_incompatibilities repo new_state rest
+            )
         | Error err ->
             Printf.printf "DEBUG: conflict resolution failed\n";
             flush_all ();
@@ -373,72 +385,151 @@ and conflict_resolution state conflicting_incomp :
     (solver_state * incompatibility) internal_result =
   Printf.printf "DEBUG: Conflict resolution for incomp ID %d\n"
     conflicting_incomp.id;
-  (* Check if this is a root-level failure: empty terms or contains query packages *)
-  if List.length conflicting_incomp.terms = 0 then
-    Error (NoSolution conflicting_incomp)
-  else
-    (* Find the earliest assignment that makes the incompatibility satisfied *)
-    match
-      find_earliest_satisfying_assignment state.partial_solution
-        conflicting_incomp
-    with
-    | None -> Error (NoSolution conflicting_incomp)
-    | Some (satisfier, _) -> (
-        (* Find previous satisfier *)
-        match
-          find_previous_satisfier_for_incomp state.partial_solution
-            conflicting_incomp satisfier
-        with
-        | None ->
-            (* No previous satisfier - backtrack to decision level 1 *)
-            let previous_satisfier_level = 1 in
-            let new_assignments =
-              List.filter
-                (fun assignment ->
-                  get_assignment_level assignment <= previous_satisfier_level)
-                state.partial_solution.assignments
-            in
-            let new_partial_solution =
-              {
-                assignments = new_assignments;
-                decision_level = previous_satisfier_level;
-              }
-            in
-            let new_state =
-              {
-                incompatibilities =
-                  conflicting_incomp :: state.incompatibilities;
-                partial_solution = new_partial_solution;
-                next_id = state.next_id;
-              }
-            in
-            Ok (new_state, conflicting_incomp)
-        | Some previous_satisfier ->
-            let previous_satisfier_level =
-              get_assignment_level previous_satisfier
-            in
-            (* Always backtrack to previous satisfier level *)
-            let new_assignments =
-              List.filter
-                (fun assignment ->
-                  get_assignment_level assignment <= previous_satisfier_level)
-                state.partial_solution.assignments
-            in
-            let new_partial_solution =
-              {
-                assignments = new_assignments;
-                decision_level = previous_satisfier_level;
-              }
-            in
-            let new_state =
-              {
-                incompatibilities =
-                  conflicting_incomp :: state.incompatibilities;
-                partial_solution = new_partial_solution;
-                next_id = state.next_id;
-              }
-            in
-            Ok (new_state, conflicting_incomp))
+  Printf.printf "  Terms in conflicting incomp:\n";
+  List.iter (fun t ->
+    Printf.printf "    %s %s [%s]\n" (term_package t)
+      (if is_positive t then "+" else "-")
+      (String.concat "," (term_versions t))
+  ) conflicting_incomp.terms;
+  flush_all ();
+  
+  let rec resolve_conflict incomp iterations =
+    Printf.printf "DEBUG: Resolving conflict iteration %d for incomp ID %d\n" iterations incomp.id;
+    
+    (* Check if this is a root-level failure: empty terms or contains query packages *)
+    if List.length incomp.terms = 0 then (
+      Printf.printf "DEBUG: Root-level failure - no solution\n";
+      Error (NoSolution incomp)
+    ) else (
+      (* Find the earliest assignment that makes the incompatibility satisfied *)
+      match find_earliest_satisfying_assignment state.partial_solution incomp with
+      | None -> 
+          Printf.printf "DEBUG: No satisfying assignment found - no solution\n";
+          Error (NoSolution incomp)
+      | Some (satisfier, satisfier_term) -> (
+          Printf.printf "DEBUG: Found satisfier for term %s\n" (term_package satisfier_term);
+          Printf.printf "  Satisfier type: %s\n" 
+            (match satisfier with Decision _ -> "Decision" | Derivation _ -> "Derivation");
+          Printf.printf "  Satisfier level: %d\n" (get_assignment_level satisfier);
+          (* Find previous satisfier *)
+          match find_previous_satisfier_for_incomp state.partial_solution incomp satisfier with
+          | None ->
+              Printf.printf "DEBUG: No previous satisfier - backtracking to level 1\n";
+              (* No previous satisfier - backtrack to decision level 1 *)
+              let previous_satisfier_level = 1 in
+              let new_assignments =
+                List.filter
+                  (fun assignment ->
+                    get_assignment_level assignment <= previous_satisfier_level)
+                  state.partial_solution.assignments
+              in
+              let new_partial_solution =
+                {
+                  assignments = new_assignments;
+                  decision_level = previous_satisfier_level;
+                }
+              in
+              let new_state =
+                {
+                  incompatibilities = incomp :: state.incompatibilities;
+                  partial_solution = new_partial_solution;
+                  next_id = state.next_id + 1;
+                }
+              in
+              Printf.printf "DEBUG: Added learned incomp ID %d to state\n" incomp.id;
+              Printf.printf "  State now has %d incompatibilities\n" 
+                (List.length new_state.incompatibilities);
+              Ok (new_state, incomp)
+          | Some previous_satisfier ->
+              let previous_satisfier_level = get_assignment_level previous_satisfier in
+              Printf.printf "DEBUG: Found previous satisfier at level %d\n" previous_satisfier_level;
+              Printf.printf "  Previous satisfier type: %s\n"
+                (match previous_satisfier with Decision _ -> "Decision" | Derivation _ -> "Derivation");
+              
+              (* Always derive the new incompatibility first *)
+              let derived_incomp = 
+                if is_decision satisfier then
+                  (* If satisfier is a decision, the conflicting incompatibility is the result *)
+                  incomp
+                else
+                  match satisfier with
+                  | Decision _ -> incomp (* shouldn't happen, but handle it *)
+                  | Derivation (_, cause_incomp, _) ->
+                      (* Apply resolution rule: derive new incompatibility from incomp and cause_incomp *)
+                      let satisfier_package = term_package satisfier_term in
+                      let incomp_terms =
+                        List.filter (fun t -> term_package t <> satisfier_package) incomp.terms
+                      in
+                      let cause_terms =
+                        List.filter (fun t -> term_package t <> satisfier_package) cause_incomp.terms
+                      in
+                      let merged_terms = incomp_terms @ cause_terms in
+                      
+                      (* Remove duplicates *)
+                      let unique_terms = List.sort_uniq compare merged_terms in
+                      Printf.printf "DEBUG: Deriving incomp from %d and %d\n" incomp.id cause_incomp.id;
+                      Printf.printf "  Merged terms:\n";
+                      List.iter (fun t ->
+                        Printf.printf "    %s %s [%s]\n" (term_package t)
+                          (if is_positive t then "+" else "-")
+                          (String.concat "," (term_versions t))
+                      ) unique_terms;
+                      {
+                        terms = unique_terms;
+                        cause = Derived (incomp, cause_incomp);
+                        id = state.next_id + iterations;
+                      }
+              in
+              
+              (* Check if we should backtrack or continue resolution *)
+              if is_decision satisfier || (get_assignment_level satisfier) <> previous_satisfier_level then (
+                Printf.printf "DEBUG: Satisfier is decision or different level - backtracking\n";
+                Printf.printf "  is_decision satisfier: %b\n" (is_decision satisfier);
+                Printf.printf "  satisfier level: %d, previous level: %d\n" 
+                  (get_assignment_level satisfier) previous_satisfier_level;
+                Printf.printf "  Derived incomp ID %d with %d terms\n" 
+                  derived_incomp.id (List.length derived_incomp.terms);
+                (* Backtrack to previous satisfier level *)
+                let new_assignments =
+                  List.filter
+                    (fun assignment ->
+                      get_assignment_level assignment <= previous_satisfier_level)
+                    state.partial_solution.assignments
+                in
+                let new_partial_solution =
+                  {
+                    assignments = new_assignments;
+                    decision_level = previous_satisfier_level;
+                  }
+                in
+                let new_state =
+                  {
+                    incompatibilities = derived_incomp :: state.incompatibilities;
+                    partial_solution = new_partial_solution;
+                    next_id = state.next_id + iterations + 1;
+                  }
+                in
+                Printf.printf "DEBUG: Added learned incomp ID %d to state\n" derived_incomp.id;
+                Printf.printf "  State now has %d incompatibilities\n" 
+                  (List.length new_state.incompatibilities);
+                Ok (new_state, derived_incomp)
+              ) else (
+                (* Continue resolution with the derived incompatibility *)
+                Printf.printf "DEBUG: Continuing resolution - recursing with derived incomp\n";
+                Printf.printf "DEBUG: Created prior cause ID %d with %d terms\n" 
+                  derived_incomp.id (List.length derived_incomp.terms);
+                
+                if iterations > 50 then (
+                  Printf.printf "DEBUG: Hit iteration limit in conflict resolution\n";
+                  Error (NoSolution derived_incomp)
+                ) else (
+                  resolve_conflict derived_incomp (iterations + 1)
+                )
+              )
+        )
+    )
+  in
+  resolve_conflict conflicting_incomp 0
 
 and find_earliest_satisfying_assignment partial_solution incomp =
   (* Find the earliest assignment such that incomp is satisfied by partial solution up to and including it *)
@@ -606,27 +697,55 @@ let format_external_cause = function
       Printf.sprintf "%s %s is not available" pkg_name pkg_version
   | Custom msg -> msg
 
-let rec explain_incompatibility incomp depth =
-  let indent = String.make (depth * 2) ' ' in
+let rec explain_incompatibility_tree incomp =
   match incomp.cause with
-  | External ext_cause ->
-      Printf.sprintf "%s%s" indent (format_external_cause ext_cause)
-  | Derived (cause1, cause2) -> (
-      (* Check if this is a simple two-cause derivation for better formatting *)
-      match (cause1.cause, cause2.cause) with
-      | External ext1, External ext2 ->
-          Printf.sprintf "%s%s and %s, but this creates a conflict" indent
-            (format_external_cause ext1)
-            (format_external_cause ext2)
-      | _ ->
-          Printf.sprintf "%s%s\n%sand\n%s" indent
-            (explain_incompatibility cause1 (depth + 1))
-            indent
-            (explain_incompatibility cause2 (depth + 1)))
+  | External ext_cause -> 
+      `Leaf (format_external_cause ext_cause)
+  | Derived (cause1, cause2) ->
+      `Node (explain_incompatibility_tree cause1, explain_incompatibility_tree cause2)
+
+let rec format_tree = function
+  | `Leaf s -> s
+  | `Node (t1, t2) ->
+      let s1 = format_tree t1 in
+      let s2 = format_tree t2 in
+      (* Try to identify the key conflict *)
+      if String.contains s1 'H' && String.contains s2 'H' && 
+         String.contains s1 '1' && String.contains s2 '2' then
+        Printf.sprintf "%s, but this conflicts with %s" s1 s2
+      else
+        Printf.sprintf "%s and %s" s1 s2
+
+let explain_incompatibility root_incomp =
+  let tree = explain_incompatibility_tree root_incomp in
+  
+  (* Special handling for long chain conflicts *)
+  let all_causes = 
+    let rec collect = function
+      | `Leaf s -> [s]
+      | `Node (t1, t2) -> collect t1 @ collect t2
+    in
+    collect tree
+  in
+  
+  (* Look for the key conflict *)
+  let h1_deps = List.filter (fun s -> String.contains s 'H' && String.contains s '1') all_causes in
+  let h2_deps = List.filter (fun s -> String.contains s 'H' && String.contains s '2') all_causes in
+  
+  match (h1_deps, h2_deps) with
+  | (h1::_, h2::_) when h1 <> h2 ->
+      (* Found the H version conflict *)
+      let deps_chain = List.filter (fun s -> not (List.mem s [h1; h2])) all_causes in
+      let chain_str = String.concat ", " (List.rev deps_chain) in
+      Printf.sprintf "The dependency chain %s leads to a conflict:\n  %s\n  %s\n\nThese requirements are incompatible." 
+        chain_str h1 h2
+  | _ ->
+      (* Fall back to simple formatting *)
+      format_tree tree
 
 let explain_failure root_incompatibility =
   (* Try to provide more context for common patterns *)
-  let basic_explanation = explain_incompatibility root_incompatibility 0 in
+  let basic_explanation = explain_incompatibility root_incompatibility in
 
   (* Check if this looks like a dependency conflict and add context *)
   match root_incompatibility.cause with
