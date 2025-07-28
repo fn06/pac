@@ -714,12 +714,7 @@ let rec format_tree = function
   | `Node (t1, t2) ->
       let s1 = format_tree t1 in
       let s2 = format_tree t2 in
-      (* Try to identify the key conflict *)
-      if String.contains s1 'H' && String.contains s2 'H' && 
-         String.contains s1 '1' && String.contains s2 '2' then
-        Printf.sprintf "%s, but this conflicts with %s" s1 s2
-      else
-        Printf.sprintf "%s and %s" s1 s2
+      Printf.sprintf "(%s and %s)" s1 s2
 
 let explain_incompatibility root_incomp =
   let tree = explain_incompatibility_tree root_incomp in
@@ -729,39 +724,68 @@ let explain_failure root_incompatibility all_incompatibilities =
   (* Try to provide more context for common patterns *)
   let basic_explanation = explain_incompatibility root_incompatibility in
 
-  (* Find who depends on a package by looking through all incompatibilities *)
-  let find_who_needs pkg_name =
-    List.filter_map (fun incomp ->
+  (* Build a dependency map from all incompatibilities *)
+  let build_dependency_map () =
+    List.fold_left (fun map incomp ->
       match incomp.cause with
-      | External (Dependency ((dep_name, dep_ver), (target, _), _)) 
-        when target = pkg_name ->
-          Some (dep_name, dep_ver)
-      | _ -> None
-    ) all_incompatibilities
+      | External (Dependency ((dep_name, dep_ver), (target, _), _)) ->
+          let current_deps = try List.assoc target map with Not_found -> [] in
+          (target, (dep_name, dep_ver) :: current_deps) :: 
+          (List.remove_assoc target map)
+      | _ -> map
+    ) [] all_incompatibilities
   in
+
+  (* Find the full dependency chain leading to a package *)
+  let rec find_dependency_chain dep_map package =
+    match List.assoc_opt package dep_map with
+    | None -> [package] (* Root package or not found *)
+    | Some deps ->
+        (* For each direct dependent, find its chain and prepend it *)
+        let chains = List.map (fun (dep_name, dep_ver) ->
+          let dep_pkg = dep_name ^ " " ^ dep_ver in
+          let parent_chain = find_dependency_chain dep_map dep_name in
+          parent_chain @ [dep_pkg ^ " -> " ^ package]
+        ) deps in
+        (* Return the shortest chain (or first one if multiple) *)
+        match chains with
+        | [] -> [package]
+        | chain :: _ -> chain
+  in
+
+  let dep_map = build_dependency_map () in
 
   (* For simple conflicts, try to explain why packages are needed *)
   match root_incompatibility.terms with
   | [Positive (pkg1, [v1]); Positive (pkg2, [v2])] ->
-      (* Two packages are in conflict - likely both required by something *)
-      let who_needs_1 = find_who_needs pkg1 in
-      let who_needs_2 = find_who_needs pkg2 in
+      (* Two packages are in conflict - find their dependency chains *)
+      let chain1 = find_dependency_chain dep_map pkg1 in
+      let chain2 = find_dependency_chain dep_map pkg2 in
       
-      let context = match (who_needs_1, who_needs_2) with
-        | ([(dep1, ver1)], [(dep2, ver2)]) when dep1 = dep2 && ver1 = ver2 ->
-            Printf.sprintf " (both required by %s %s)" dep1 ver1
-        | (deps1, deps2) when deps1 <> [] || deps2 <> [] ->
-            let format_deps deps pkg = 
-              match deps with
-              | [] -> ""
-              | _ -> 
-                  let dep_strs = List.map (fun (n, v) -> Printf.sprintf "%s %s" n v) deps in
-                  Printf.sprintf "%s required by %s" pkg (String.concat ", " dep_strs)
-            in
-            let parts = List.filter ((<>) "") [format_deps who_needs_1 (pkg1 ^ " " ^ v1); 
-                                                format_deps who_needs_2 (pkg2 ^ " " ^ v2)] in
-            if parts = [] then "" else " (" ^ String.concat "; " parts ^ ")"
-        | _ -> ""
+      let format_chain chain package =
+        match chain with
+        | [single] when single = package -> "directly required"
+        | _ -> 
+            let clean_chain = List.filter (fun s -> not (String.contains s '>')) chain in
+            if List.length clean_chain <= 1 then "directly required"
+            else
+              let chain_str = String.concat " -> " (List.rev clean_chain) in
+              Printf.sprintf "required by dependency chain: %s" chain_str
+      in
+      
+      let pkg1_with_ver = pkg1 ^ " " ^ v1 in
+      let pkg2_with_ver = pkg2 ^ " " ^ v2 in
+      let context1 = format_chain chain1 pkg1 in
+      let context2 = format_chain chain2 pkg2 in
+      
+      let context = 
+        if context1 = "directly required" && context2 = "directly required" then
+          ""
+        else if context1 = context2 then
+          Printf.sprintf "\n\nBoth packages are %s." context1
+        else
+          Printf.sprintf "\n\n%s is %s.\n%s is %s." 
+            pkg1_with_ver context1 pkg2_with_ver context2
       in
       Printf.sprintf
         "Version solving failed:\n\
@@ -770,7 +794,7 @@ let explain_failure root_incompatibility all_incompatibilities =
         pkg1 v1 pkg2 v2 context basic_explanation
   | _ ->
       Printf.sprintf
-        "Version solving failed:\n\n%s\n\nTherefore, no solution exists."
+        "Version solving failed:\n\n%s"
         basic_explanation
 
 (* Helper function to check if package has decision *)
