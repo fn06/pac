@@ -42,7 +42,7 @@ let test_case name pac_file query expected_result =
             (String.concat "," (term_versions term)))
         incomp.terms;
       Printf.printf "\n--- DETAILED EXPLANATION ---\n";
-      Printf.printf "%s\n" (explain_failure incomp);
+      Printf.printf "%s\n" (explain_incompatibility incomp);
       Printf.printf "--- END EXPLANATION ---\n";
       Printf.printf "Expected: %s\n" expected_result
   | Error (InvalidInput msg) ->

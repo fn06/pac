@@ -32,7 +32,6 @@ let major_version v = List.hd (String.split_on_char '.' v)
 let check_cmd filename query_str resolution_str granularity calculus () =
   let ast_deps = process_file filename in
   let deps = of_ast_expression ast_deps in
-  let repo = repository_from_ast ast_deps in
   let g =
     match granularity with
     | "major" -> major_version
@@ -80,22 +79,6 @@ let check_cmd filename query_str resolution_str granularity calculus () =
       Printf.printf "\tDependency closure: %b\n" dep_closure;
       Printf.printf "\tVersion granularity: %b\n" version_granularity;
       Printf.printf "\tValid concurrent resolution: %b\n" concurrent_resolution
-  | "pubgrub" -> (
-      (* Use PubGrub solver *)
-      match Pubgrub.solve repo deps query with
-      | Pubgrub.Solution solution ->
-          Printf.printf "PubGrub resolution:\n";
-          Printf.printf "\tSolution found: %s\n"
-            (String.concat ", " (List.map string_of_package solution));
-          Printf.printf "\tMatches provided resolution: %b\n"
-            (List.for_all (fun pkg -> List.mem pkg solution) resolution
-            && List.for_all (fun pkg -> List.mem pkg resolution) solution)
-      | Pubgrub.Error (Pubgrub.NoSolution (incomp, all_incomps)) ->
-          Printf.printf "PubGrub resolution:\n";
-          Printf.printf "\t%s\n" (Pubgrub.explain_failure incomp all_incomps)
-      | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
-          Printf.printf "PubGrub resolution:\n";
-          Printf.printf "\tInvalid input: %s\n" msg)
   | _ ->
       failwith
         (Printf.sprintf
@@ -267,8 +250,8 @@ let solve_cmd filename query_str debug () =
       List.iter
         (fun (name, version) -> Printf.printf "  %s %s\n" name version)
         solution
-  | Pubgrub.Error (Pubgrub.NoSolution (incomp, all_incomps)) ->
-      Printf.printf "%s\n" (Pubgrub.explain_failure incomp all_incomps)
+  | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
+      Printf.printf "%s\n" (Pubgrub.explain_incompatibility incomp)
   | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
       Printf.printf "Invalid input: %s\n" msg
 

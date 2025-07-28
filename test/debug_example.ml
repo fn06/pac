@@ -58,7 +58,7 @@ let debug_example () =
       List.iter
         (fun (name, version) -> Printf.printf "  %s %s\n" name version)
         packages
-  | Error (NoSolution (incomp, _)) ->
+  | Error (NoSolution incomp) ->
       Printf.printf "✗ NO SOLUTION (incompatibility ID: %d)\n" incomp.id;
       Printf.printf "Incompatibility terms: %d\n" (List.length incomp.terms);
       List.iteri

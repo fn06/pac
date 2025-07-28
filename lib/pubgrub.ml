@@ -57,7 +57,7 @@ type solver_state = {
 
 (* Error types *)
 type solve_error =
-  | NoSolution of incompatibility * incompatibility list (* Root cause incompatibility and all incompatibilities *)
+  | NoSolution of incompatibility
   | InvalidInput of string
 
 type solve_result = Solution of package list | Error of solve_error
@@ -106,12 +106,12 @@ let get_assigned_packages partial_solution =
   List.fold_left
     (fun acc -> function
       | Decision (pkg, _) -> pkg :: acc
-      | Derivation (Positive (name, versions), _, _) -> (
-          (* For positive derivations, we need to find which specific version was chosen *)
-          (* For now, just take the first version as a simplification *)
-          match versions with
-          | [] -> acc
-          | v :: _ -> (name, v) :: acc)
+      | Derivation (Positive (name, [version]), _, _) -> 
+          (* Only count single-version positive derivations as assignments *)
+          (name, version) :: acc
+      | Derivation (Positive (_, _), _, _) -> 
+          (* Multi-version derivations don't select a specific version *)
+          acc
       | Derivation (Negative _, _, _) -> acc)
     [] partial_solution.assignments
 
@@ -277,27 +277,52 @@ and process_incompatibilities (repo : repository) state incomps :
         | Ok (new_state, learned_incomp) ->
             debug_printf "DEBUG: conflict resolution succeeded\n";
             if !debug_enabled then flush_all ();
-            (* Check if the learned incompatibility is satisfied - if so, no solution exists *)
-            if incompatibility_satisfied new_state.partial_solution learned_incomp then (
-              debug_printf "DEBUG: Learned incomp is satisfied - no solution!\n";
-              if !debug_enabled then flush_all ();
-              Error (NoSolution (learned_incomp, new_state.incompatibilities))
-            ) else if incompatibility_almost_satisfied new_state.partial_solution learned_incomp then (
+            (* After backtracking, continue processing with the learned incompatibility *)
+            let new_state_with_learned = {
+              new_state with
+              incompatibilities = 
+                if List.exists (fun i -> i.id = learned_incomp.id) new_state.incompatibilities
+                then new_state.incompatibilities
+                else learned_incomp :: new_state.incompatibilities
+            } in
+            if incompatibility_satisfied new_state_with_learned.partial_solution learned_incomp then (
+              (* Check if this is a root-level conflict *)
+              if List.length learned_incomp.terms = 0 || 
+                 (List.length learned_incomp.terms = 1 && 
+                  match learned_incomp.terms with
+                  | [Positive (name, versions)] -> 
+                      (* Check if this is a query package *)
+                      List.exists (fun assignment ->
+                        match assignment with
+                        | Decision ((n, v), 0) when n = name && List.mem v versions -> true
+                        | _ -> false
+                      ) new_state_with_learned.partial_solution.assignments
+                  | _ -> false) then (
+                debug_printf "DEBUG: Root-level conflict - no solution!\n";
+                if !debug_enabled then flush_all ();
+                Error (NoSolution learned_incomp)
+              ) else (
+                (* Continue with conflict resolution *)
+                debug_printf "DEBUG: Learned incomp still satisfied after backtrack, continuing resolution\n";
+                if !debug_enabled then flush_all ();
+                process_incompatibilities repo new_state_with_learned (learned_incomp :: incomps)
+              )
+            ) else if incompatibility_almost_satisfied new_state_with_learned.partial_solution learned_incomp then (
               (* Find the package name from the learned incompatibility to focus on *)
               let unsatisfied_term =
-                get_unsatisfied_term new_state.partial_solution learned_incomp
+                get_unsatisfied_term new_state_with_learned.partial_solution learned_incomp
               in
               let changed_pkg = term_package unsatisfied_term in
               debug_printf
                 "DEBUG: focusing on package %s after conflict resolution\n"
                 changed_pkg;
               if !debug_enabled then flush_all ();
-              Ok (new_state, Some changed_pkg)
+              Ok (new_state_with_learned, Some changed_pkg)
             ) else (
               (* The learned incompatibility is not immediately applicable, continue *)
               debug_printf "DEBUG: Learned incomp not immediately applicable, continuing\n";
               if !debug_enabled then flush_all ();
-              process_incompatibilities repo new_state rest
+              process_incompatibilities repo new_state_with_learned rest
             )
         | Error err ->
             debug_printf "DEBUG: conflict resolution failed\n";
@@ -340,8 +365,9 @@ and process_incompatibilities (repo : repository) state incomps :
                   id = state.next_id + 1;
                 }
               in
-              Error (NoSolution (derived_incomp, state.incompatibilities))
+              Error (NoSolution derived_incomp)
             else
+              (* One or more versions available - derive the term *)
               let new_assignment =
                 Derivation
                   (negated_term, incomp, state.partial_solution.decision_level)
@@ -404,13 +430,13 @@ and conflict_resolution state conflicting_incomp :
     (* Check if this is a root-level failure: empty terms or contains query packages *)
     if List.length incomp.terms = 0 then (
       debug_printf "DEBUG: Root-level failure - no solution\n";
-      Error (NoSolution (incomp, state.incompatibilities))
+      Error (NoSolution incomp)
     ) else (
       (* Find the earliest assignment that makes the incompatibility satisfied *)
       match find_earliest_satisfying_assignment state.partial_solution incomp with
       | None -> 
           debug_printf "DEBUG: No satisfying assignment found - no solution\n";
-          Error (NoSolution (incomp, state.incompatibilities))
+          Error (NoSolution incomp)
       | Some (satisfier, satisfier_term) -> (
           debug_printf "DEBUG: Found satisfier for term %s\n" (term_package satisfier_term);
           debug_printf "  Satisfier type: %s\n" 
@@ -526,7 +552,7 @@ and conflict_resolution state conflicting_incomp :
                 
                 if iterations > 50 then (
                   debug_printf "DEBUG: Hit iteration limit in conflict resolution\n";
-                  Error (NoSolution (derived_incomp, state.incompatibilities))
+                  Error (NoSolution derived_incomp)
                 ) else (
                   resolve_conflict derived_incomp (iterations + 1)
                 )
@@ -720,83 +746,6 @@ let explain_incompatibility root_incomp =
   let tree = explain_incompatibility_tree root_incomp in
   format_tree tree
 
-let explain_failure root_incompatibility all_incompatibilities =
-  (* Try to provide more context for common patterns *)
-  let basic_explanation = explain_incompatibility root_incompatibility in
-
-  (* Build a dependency map from all incompatibilities *)
-  let build_dependency_map () =
-    List.fold_left (fun map incomp ->
-      match incomp.cause with
-      | External (Dependency ((dep_name, dep_ver), (target, _), _)) ->
-          let current_deps = try List.assoc target map with Not_found -> [] in
-          (target, (dep_name, dep_ver) :: current_deps) :: 
-          (List.remove_assoc target map)
-      | _ -> map
-    ) [] all_incompatibilities
-  in
-
-  (* Find the full dependency chain leading to a package *)
-  let rec find_dependency_chain dep_map package =
-    match List.assoc_opt package dep_map with
-    | None -> [package] (* Root package or not found *)
-    | Some deps ->
-        (* For each direct dependent, find its chain and prepend it *)
-        let chains = List.map (fun (dep_name, dep_ver) ->
-          let dep_pkg = dep_name ^ " " ^ dep_ver in
-          let parent_chain = find_dependency_chain dep_map dep_name in
-          parent_chain @ [dep_pkg ^ " -> " ^ package]
-        ) deps in
-        (* Return the shortest chain (or first one if multiple) *)
-        match chains with
-        | [] -> [package]
-        | chain :: _ -> chain
-  in
-
-  let dep_map = build_dependency_map () in
-
-  (* For simple conflicts, try to explain why packages are needed *)
-  match root_incompatibility.terms with
-  | [Positive (pkg1, [v1]); Positive (pkg2, [v2])] ->
-      (* Two packages are in conflict - find their dependency chains *)
-      let chain1 = find_dependency_chain dep_map pkg1 in
-      let chain2 = find_dependency_chain dep_map pkg2 in
-      
-      let format_chain chain package =
-        match chain with
-        | [single] when single = package -> "directly required"
-        | _ -> 
-            let clean_chain = List.filter (fun s -> not (String.contains s '>')) chain in
-            if List.length clean_chain <= 1 then "directly required"
-            else
-              let chain_str = String.concat " -> " (List.rev clean_chain) in
-              Printf.sprintf "required by dependency chain: %s" chain_str
-      in
-      
-      let pkg1_with_ver = pkg1 ^ " " ^ v1 in
-      let pkg2_with_ver = pkg2 ^ " " ^ v2 in
-      let context1 = format_chain chain1 pkg1 in
-      let context2 = format_chain chain2 pkg2 in
-      
-      let context = 
-        if context1 = "directly required" && context2 = "directly required" then
-          ""
-        else if context1 = context2 then
-          Printf.sprintf "\n\nBoth packages are %s." context1
-        else
-          Printf.sprintf "\n\n%s is %s.\n%s is %s." 
-            pkg1_with_ver context1 pkg2_with_ver context2
-      in
-      Printf.sprintf
-        "Version solving failed:\n\
-         %s %s and %s %s are both required%s, but their dependencies conflict:\n\
-         %s"
-        pkg1 v1 pkg2 v2 context basic_explanation
-  | _ ->
-      Printf.sprintf
-        "Version solving failed:\n\n%s"
-        basic_explanation
-
 (* Helper function to check if package has decision *)
 let has_decision_for_package package_name partial_solution =
   List.exists
@@ -826,10 +775,24 @@ let make_decision (repo : repository) state =
           (fun version -> List.mem (package_name, version) repo)
           required_versions
       in
+      
+      (* Filter out versions that would conflict with negative derivations *)
+      let compatible_versions =
+        List.filter
+          (fun version ->
+            (* Check if this version conflicts with any negative derivations *)
+            not (List.exists
+              (function
+                | Derivation (Negative (n, versions), _, _) when n = package_name ->
+                    List.mem version versions
+                | _ -> false)
+              state.partial_solution.assignments))
+          available_versions
+      in
 
-      match available_versions with
+      match compatible_versions with
       | [] ->
-          (* No available versions - this should trigger a conflict *)
+          (* No compatible versions - this should trigger a conflict *)
           None
       | version :: _ ->
           let new_decision_level = state.partial_solution.decision_level + 1 in
