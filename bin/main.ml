@@ -29,7 +29,7 @@ let major_version v = List.hd (String.split_on_char '.' v)
 
 let check_cmd filename query_str resolution_str granularity calculus () =
   let ast = process_file filename in
-  let deps = of_ast_expression ast in
+  let deps = Core.of_ast_expression ast in
   let g =
     match granularity with
     | "major" -> major_version
@@ -41,31 +41,22 @@ let check_cmd filename query_str resolution_str granularity calculus () =
   in
   match calculus with
   | "core" ->
-      let query_inclusion =
-        Resolution.check_query_inclusion ~query ~resolution
-      in
-      let dep_closure = Resolution.check_dependency_closure deps resolution in
-      let version_uniqueness = Resolution.check_version_uniqueness resolution in
-      let valid_resolution =
-        Resolution.check_resolution deps ~query ~resolution
-      in
+      let open Core.Resolution in
+      let query_inclusion = check_query_inclusion ~query ~resolution in
+      let dep_closure = check_dependency_closure deps resolution in
+      let version_uniqueness = check_version_uniqueness resolution in
+      let valid_resolution = check_resolution deps ~query ~resolution in
       Printf.printf "Core resolution: %b\n" valid_resolution;
       Printf.printf "\tQuery inclusion: %b\n" query_inclusion;
       Printf.printf "\tDependency closure: %b\n" dep_closure;
       Printf.printf "\tVersion uniqueness: %b\n" version_uniqueness
   | "concurrent" ->
-      let query_inclusion =
-        ConcurrentResolution.check_query_inclusion ~query ~resolution
-      in
-      let dep_closure =
-        ConcurrentResolution.check_dependency_closure deps resolution
-      in
-      let version_granularity =
-        ConcurrentResolution.check_version_granularity g resolution
-      in
+      let open Concurrent.Resolution in
+      let query_inclusion = check_query_inclusion ~query ~resolution in
+      let dep_closure = check_dependency_closure deps resolution in
+      let version_granularity = check_version_granularity g resolution in
       let concurrent_resolution =
-        ConcurrentResolution.check_concurrent_resolution g deps ~query
-          ~resolution
+        check_concurrent_resolution g deps ~query ~resolution
       in
       Printf.printf "Concurrent resolution: %b\n" concurrent_resolution;
       Printf.printf "\tQuery inclusion: %b\n" query_inclusion;
@@ -79,7 +70,7 @@ let check_cmd filename query_str resolution_str granularity calculus () =
 
 let reduce_cmd filename granularity from_calculus to_calculus () =
   let ast = process_file filename in
-  let deps = of_ast_expression ast in
+  let deps = Core.of_ast_expression ast in
   let g =
     match granularity with
     | "major" -> major_version
@@ -88,7 +79,7 @@ let reduce_cmd filename granularity from_calculus to_calculus () =
   match (from_calculus, to_calculus) with
   | "concurrent", "core" ->
       let reduced = Concurrent.encode_dependencies g deps in
-      let ast_reduced = to_ast_expression reduced in
+      let ast_reduced = Core.to_ast_expression reduced in
       Ast.pp Format.std_formatter ast_reduced
   | "core", "concurrent" -> Ast.pp Format.std_formatter ast
   | src, dst when src = dst -> Ast.pp Format.std_formatter ast
@@ -228,8 +219,8 @@ let default_info =
 
 let solve_cmd filename query_str debug () =
   let ast = process_file filename in
-  let deps = of_ast_expression ast in
-  let repo = repository_from_ast ast in
+  let deps = Core.of_ast_expression ast in
+  let repo = Core.repository_from_ast ast in
   let query = List.map parse_package (String.split_on_char ',' query_str) in
   Pubgrub.set_debug debug;
   match Pubgrub.solve repo deps query with

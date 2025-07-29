@@ -6,7 +6,7 @@ let debug_printf fmt =
 let set_debug enabled = debug_enabled := enabled
 
 (* Core types from the Package Calculus *)
-type name = string
+type name = Core.name
 type version = string
 type package = name * version
 type dependency = package * (name * version list)
