@@ -13,8 +13,6 @@ let process_file filename =
     if ic <> In_channel.stdin then close_in ic;
     raise e
 
-let string_of_package (name, version) = Printf.sprintf "%s %s" name version
-
 let parse_package str =
   match String.split_on_char ' ' str with
   | [ name; version ] -> (name, version)
@@ -30,8 +28,8 @@ let parse_cmd filename =
 let major_version v = List.hd (String.split_on_char '.' v)
 
 let check_cmd filename query_str resolution_str granularity calculus () =
-  let ast_deps = process_file filename in
-  let deps = of_ast_expression ast_deps in
+  let ast = process_file filename in
+  let deps = of_ast_expression ast in
   let g =
     match granularity with
     | "major" -> major_version
@@ -41,10 +39,6 @@ let check_cmd filename query_str resolution_str granularity calculus () =
   let resolution =
     List.map parse_package (String.split_on_char ',' resolution_str)
   in
-  Printf.printf "Query: %s\n"
-    (String.concat ", " (List.map string_of_package query));
-  Printf.printf "Resolution: %s\n"
-    (String.concat ", " (List.map string_of_package resolution));
   match calculus with
   | "core" ->
       let query_inclusion =
@@ -86,8 +80,8 @@ let check_cmd filename query_str resolution_str granularity calculus () =
            calculus)
 
 let reduce_cmd filename granularity from_calculus to_calculus () =
-  let ast_deps = process_file filename in
-  let deps = of_ast_expression ast_deps in
+  let ast = process_file filename in
+  let deps = of_ast_expression ast in
   let g =
     match granularity with
     | "major" -> major_version
@@ -98,8 +92,8 @@ let reduce_cmd filename granularity from_calculus to_calculus () =
       let reduced = Concurrent.encode_dependencies g deps in
       let ast_reduced = to_ast_expression reduced in
       Ast.pp Format.std_formatter ast_reduced
-  | "core", "concurrent" -> Ast.pp Format.std_formatter ast_deps
-  | src, dst when src = dst -> Ast.pp Format.std_formatter ast_deps
+  | "core", "concurrent" -> Ast.pp Format.std_formatter ast
+  | src, dst when src = dst -> Ast.pp Format.std_formatter ast
   | src, dst ->
       failwith (Printf.sprintf "Unsupported reduction: %s to %s" src dst)
 
@@ -235,15 +229,11 @@ let default_info =
       ]
 
 let solve_cmd filename query_str debug () =
-  let ast_deps = process_file filename in
-  let deps = of_ast_expression ast_deps in
-  let repo = repository_from_ast ast_deps in
+  let ast = process_file filename in
+  let deps = of_ast_expression ast in
+  let repo = repository_from_ast ast in
   let query = List.map parse_package (String.split_on_char ',' query_str) in
-
   Pubgrub.set_debug debug;
-  Printf.printf "Query: %s\n"
-    (String.concat ", " (List.map string_of_package query));
-
   match Pubgrub.solve repo deps query with
   | Pubgrub.Solution solution ->
       Printf.printf "Solution found:\n";
@@ -255,7 +245,8 @@ let solve_cmd filename query_str debug () =
   | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
       Printf.printf "Invalid input: %s\n" msg
 
-let solve_term = Term.(const solve_cmd $ file_arg $ query_arg $ debug_arg $ const ())
+let solve_term =
+  Term.(const solve_cmd $ file_arg $ query_arg $ debug_arg $ const ())
 
 let solve_info =
   Cmd.info "solve" ~doc:"Solve dependencies using PubGrub algorithm"

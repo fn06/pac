@@ -1,0 +1,2 @@
+(cram
+ (deps %{bin:pac} (glob_files *.pac)))
