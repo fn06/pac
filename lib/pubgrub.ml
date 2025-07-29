@@ -58,8 +58,8 @@ type solver_state = {
 }
 
 (* Error types *)
-type solve_error = NoSolution of incompatibility | InvalidInput of string
-type solve_result = Solution of package list | Error of solve_error
+type solve_error = NoResolution of incompatibility | InvalidInput of string
+type solve_result = Resolution of package list | Error of solve_error
 
 (* Internal result type for intermediate operations *)
 type 'a internal_result = Ok of 'a | Error of solve_error
@@ -313,7 +313,7 @@ and process_incompatibilities (repo : repository) state incomps :
               then (
                 debug_printf "DEBUG: Root-level conflict - no solution!\n";
                 if !debug_enabled then flush_all ();
-                Error (NoSolution learned_incomp))
+                Error (NoResolution learned_incomp))
               else (
                 (* Continue with conflict resolution *)
                 debug_printf
@@ -384,7 +384,7 @@ and process_incompatibilities (repo : repository) state incomps :
                   id = state.next_id + 1;
                 }
               in
-              Error (NoSolution derived_incomp)
+              Error (NoResolution derived_incomp)
             else
               (* One or more versions available - check for conflicts before deriving *)
               (* Check if this positive derivation conflicts with existing negative derivations *)
@@ -491,7 +491,7 @@ and process_incompatibilities (repo : repository) state incomps :
                             debug_printf
                               "DEBUG: Root-level conflict - no solution!\n";
                             if !debug_enabled then flush_all ();
-                            Error (NoSolution learned_incomp))
+                            Error (NoResolution learned_incomp))
                           else (
                             (* Continue with conflict resolution *)
                             debug_printf
@@ -603,7 +603,7 @@ and conflict_resolution state conflicting_incomp :
     (* Check if this is a root-level failure: empty terms or contains query packages *)
     if List.length incomp.terms = 0 then (
       debug_printf "DEBUG: Root-level failure - no solution\n";
-      Error (NoSolution incomp))
+      Error (NoResolution incomp))
     else
       (* Find the earliest assignment that makes the incompatibility satisfied *)
       match
@@ -641,8 +641,8 @@ and conflict_resolution state conflicting_incomp :
                 id = state.next_id;
               }
             in
-            Error (NoSolution derived_incomp))
-          else Error (NoSolution incomp)
+            Error (NoResolution derived_incomp))
+          else Error (NoResolution incomp)
       | Some (satisfier, satisfier_term) -> (
           debug_printf "DEBUG: Found satisfier for term %s\n"
             (term_package satisfier_term);
@@ -792,7 +792,7 @@ and conflict_resolution state conflicting_incomp :
                 if iterations > 50 then (
                   debug_printf
                     "DEBUG: Hit iteration limit in conflict resolution\n";
-                  Error (NoSolution derived_incomp))
+                  Error (NoResolution derived_incomp))
                 else resolve_conflict derived_incomp (iterations + 1)))
   in
   resolve_conflict conflicting_incomp 0
@@ -1089,12 +1089,12 @@ let solve (repo : repository) (deps : dependencies) (query : query) :
       | Error err -> Error err
       | Ok new_state -> (
           if is_complete_solution new_state then
-            Solution (extract_solution new_state)
+            Resolution (extract_solution new_state)
           else
             (* Decision making *)
             match make_decision repo new_state with
             | None ->
-                Solution (extract_solution new_state)
+                Resolution (extract_solution new_state)
                 (* No more decisions needed *)
             | Some newer_state -> (
                 (* Get the package name from the most recent decision *)
@@ -1111,7 +1111,7 @@ let solve (repo : repository) (deps : dependencies) (query : query) :
   | [] ->
       debug_printf "DEBUG: Empty query, returning empty solution\n";
       if !debug_enabled then flush_all ();
-      Solution []
+      Resolution []
   | (name, _) :: _ ->
       debug_printf "DEBUG: Starting solve_loop with package %s\n" name;
       if !debug_enabled then flush_all ();

@@ -235,12 +235,14 @@ let solve_cmd filename query_str debug () =
   let query = List.map parse_package (String.split_on_char ',' query_str) in
   Pubgrub.set_debug debug;
   match Pubgrub.solve repo deps query with
-  | Pubgrub.Solution solution ->
-      Printf.printf "Solution found:\n";
-      List.iter
-        (fun (name, version) -> Printf.printf "  %s %s\n" name version)
+  | Pubgrub.Resolution solution ->
+      Format.printf "%a"
+        Format.(
+          pp_print_list
+            ~pp_sep:(fun out () -> fprintf out ", ")
+            (fun out (n, v) -> fprintf out "%s %s" n v))
         solution
-  | Pubgrub.Error (Pubgrub.NoSolution incomp) ->
+  | Pubgrub.Error (Pubgrub.NoResolution incomp) ->
       Printf.printf "%s\n" (Pubgrub.explain_incompatibility incomp)
   | Pubgrub.Error (Pubgrub.InvalidInput msg) ->
       Printf.printf "Invalid input: %s\n" msg
