@@ -236,7 +236,7 @@ let solve_cmd filename query_str debug () =
   Pubgrub.set_debug debug;
   match Pubgrub.solve repo deps query with
   | Pubgrub.Resolution solution ->
-      Format.printf "%a"
+      Format.printf "%a\n"
         Format.(
           pp_print_list
             ~pp_sep:(fun out () -> fprintf out ", ")
