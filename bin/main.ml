@@ -14,7 +14,7 @@ let process_file filename =
     raise e
 
 let parse_package str =
-  match String.split_on_char ' ' str with
+  match String.split_on_char ' ' (String.trim str) with
   | [ name; version ] -> (name, version)
   | _ ->
       failwith
@@ -49,11 +49,10 @@ let check_cmd filename query_str resolution_str granularity calculus () =
       let valid_resolution =
         Resolution.check_resolution deps ~query ~resolution
       in
-      Printf.printf "Core resolution:\n";
+      Printf.printf "Core resolution: %b\n" valid_resolution;
       Printf.printf "\tQuery inclusion: %b\n" query_inclusion;
       Printf.printf "\tDependency closure: %b\n" dep_closure;
-      Printf.printf "\tVersion uniqueness: %b\n" version_uniqueness;
-      Printf.printf "\tValid core resolution: %b\n" valid_resolution
+      Printf.printf "\tVersion uniqueness: %b\n" version_uniqueness
   | "concurrent" ->
       let query_inclusion =
         ConcurrentResolution.check_query_inclusion ~query ~resolution
@@ -68,11 +67,10 @@ let check_cmd filename query_str resolution_str granularity calculus () =
         ConcurrentResolution.check_concurrent_resolution g deps ~query
           ~resolution
       in
-      Printf.printf "Concurrent resolution:\n";
+      Printf.printf "Concurrent resolution: %b\n" concurrent_resolution;
       Printf.printf "\tQuery inclusion: %b\n" query_inclusion;
       Printf.printf "\tDependency closure: %b\n" dep_closure;
-      Printf.printf "\tVersion granularity: %b\n" version_granularity;
-      Printf.printf "\tValid concurrent resolution: %b\n" concurrent_resolution
+      Printf.printf "\tVersion granularity: %b\n" version_granularity
   | _ ->
       failwith
         (Printf.sprintf
