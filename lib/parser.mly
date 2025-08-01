@@ -3,6 +3,8 @@
 %token EOF
 
 %start <Ast.expression> expression
+%start <Ast.package> package
+%start <Ast.target> target
 %%
 
 expression:
