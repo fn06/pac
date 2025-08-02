@@ -112,8 +112,8 @@ let solve_cmd filename query_str debug () =
     ast;
   Pubgrub.set_debug debug;
   match Pubgrub.solve available_version deps with
-  | Ok resolution -> Format.printf "%a\n" (Repr.pp resolution_t) resolution
-  | Error incomp -> Format.printf "%a" Pubgrub.explain_incompatibility incomp
+  | Ok resolution -> Format.printf "%a\n%!" (Repr.pp resolution_t) resolution
+  | Error incomp -> Format.printf "%a\n%!" Pubgrub.explain_incompatibility incomp
 
 let file_arg =
   let doc = "Input file with dependency information (stdin used if not specified)" in

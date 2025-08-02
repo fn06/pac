@@ -10,6 +10,6 @@ module Result = struct
   include Result
 
   module Syntax = struct
-    let ( let* ) = Result.bind
+    let ( let> ) = Result.bind
   end
 end
