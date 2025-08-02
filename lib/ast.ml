@@ -3,7 +3,7 @@ type version = string
 type package = name * version
 type dependency = package * (name * version list) list
 type expression = dependency list
-type target = name * version list
+type query = (name * version list) list
 
 let pp_package ppf (n, v) = Format.fprintf ppf "%s %s" n v
 

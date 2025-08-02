@@ -13,9 +13,7 @@ let process_file filename =
 
 let parse_package str = Parser.package Lexer.read (Lexing.from_string str)
 
-let parse_query str =
-  (* [ ("A", [ "1" ]) ] *)
-  [ Parser.target Lexer.read (Lexing.from_string str) ]
+let parse_query str = Parser.query Lexer.read (Lexing.from_string str)
 
 let parse_cmd filename =
   let deps = process_file filename in
@@ -128,7 +126,7 @@ let calculus_arg =
   Arg.(value & opt string "core" & info [ "c"; "calculus" ] ~docv:"CALCULUS" ~doc)
 
 let query_arg =
-  let doc = "Comma-separated list of packages in the query (format: 'name (version+)')" in
+  let doc = "In the format 'A ( 1 2 ... ) B ( 1 2 3 ... )'" in
   Arg.(required & opt (some string) None & info [ "q"; "query" ] ~docv:"QUERY" ~doc)
 
 let resolution_arg =

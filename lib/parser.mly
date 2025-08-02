@@ -4,11 +4,14 @@
 
 %start <Ast.expression> expression
 %start <Ast.package> package
-%start <Ast.target> target
+%start <Ast.query> query
 %%
 
 expression:
   | e = dependencies; EOF { e }
+
+query:
+  | q = targets; EOF { q }
 
 dependencies:
   | { [  ] }

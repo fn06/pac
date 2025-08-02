@@ -370,12 +370,13 @@ let make_decision available_versions dependencies state =
   in
   let rec find_undecided_term = function
     | [] -> None
-    | (Derivation ((Pos, name, _), _), _) :: _ -> (
+    | (Derivation ((Pos, name, _), _), _) :: solution -> (
         match find_versions name state.solution with
         | Ok (Some (pvs, nvs)) ->
             let vs = minus pvs nvs in
             Some (name, vs)
-        | _ -> None)
+        | _ ->
+            find_undecided_term solution)
     | _ :: solution -> find_undecided_term solution
   in
   let* name, vs = find_undecided_term state.solution in
