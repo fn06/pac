@@ -9,30 +9,6 @@ type dependency = package * (name * version list) [@@deriving repr]
 type dependencies = (package, name * version list) Hashtbl.t [@@deriving repr]
 type available_versions = (name, version) Hashtbl.t [@@deriving repr]
 type resolution = package list [@@deriving repr]
-
-let name_t =
-  let pp fmt = function | RootName -> Format.pp_print_string fmt "Root" | Name n -> Format.pp_print_string fmt n in
-  Repr.like ~pp name_t
-
-let version_t =
-  let pp fmt = function | RootVersion -> Format.pp_print_string fmt "Root" | Version n -> Format.pp_print_string fmt n in
-  Repr.like ~pp version_t
-
-let resolution_t =
-  let pp = Format.(pp_print_list ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ") (fun fmt (n, v) -> fprintf fmt "%a %a" (Repr.pp name_t) n (Repr.pp version_t) v)) in
-  Repr.like ~pp resolution_t
-
-let debug_enabled = ref false
-
-let debug_printf fmt =
-  if !debug_enabled then
-    Format.kfprintf
-      (fun _ -> Format.pp_print_flush Format.std_formatter ())
-      Format.std_formatter fmt
-  else Format.ifprintf Format.std_formatter fmt
-
-let set_debug enabled = debug_enabled := enabled
-
 type polarity = Pos | Neg [@@deriving repr]
 
 (* TODO version formula *)
@@ -61,6 +37,128 @@ type state = {
 }
 [@@deriving repr]
 
+let name_t =
+  let pp fmt = function
+    | RootName -> Format.pp_print_string fmt "Root"
+    | Name n -> Format.pp_print_string fmt n
+  in
+  Repr.like ~pp name_t
+
+let version_t =
+  let pp fmt = function
+    | RootVersion -> Format.pp_print_string fmt "Root"
+    | Version n -> Format.pp_print_string fmt n
+  in
+  Repr.like ~pp version_t
+
+let versions_t =
+  let pp fmt vs =
+    Format.fprintf fmt "(%a)"
+      Format.(
+        pp_print_list
+          ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
+          (fun fmt v -> fprintf fmt "%a" (Repr.pp version_t) v))
+      vs
+  in
+  Repr.like ~pp (Repr.list version_t)
+
+let package_t =
+  let pp fmt (n, v) =
+    Format.fprintf fmt "%a %a" (Repr.pp name_t) n (Repr.pp version_t) v
+  in
+  Repr.like ~pp package_t
+
+let dependency_t =
+  let pp fmt (p, (n, vs)) =
+    Format.fprintf fmt "%a Δ %a %a" (Repr.pp package_t) p (Repr.pp name_t) n
+      Repr.(pp versions_t)
+      vs
+  in
+  Repr.like ~pp dependency_t
+
+let resolution_t =
+  let pp =
+    Format.(
+      pp_print_list
+        ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
+        (fun fmt (n, v) -> fprintf fmt "%a %a" (Repr.pp name_t) n (Repr.pp version_t) v))
+  in
+  Repr.like ~pp resolution_t
+
+let polarity_t =
+  let pp fmt = function
+    | Pos -> Format.fprintf fmt "%s" ""
+    | Neg -> Format.fprintf fmt "%s" "not "
+  in
+  Repr.like ~pp polarity_t
+
+let term_t =
+  let pp fmt (p, n, vs) =
+    Format.fprintf fmt "%a%a %a" (Repr.pp polarity_t) p (Repr.pp name_t) n
+      Repr.(pp versions_t)
+      vs
+  in
+  Repr.like ~pp term_t
+
+let terms_t =
+  let pp fmt terms =
+    Format.fprintf fmt "{%a}"
+      Format.(
+        pp_print_list
+          ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
+          (fun fmt t -> fprintf fmt "%a" (Repr.pp term_t) t))
+      terms
+  in
+  Repr.like ~pp (Repr.list term_t)
+
+let incompatibility_t =
+  let pp fmt { terms; cause } =
+    Format.fprintf fmt "(terms: %a, cause: (%a)" (Repr.pp terms_t) terms
+      (Repr.pp
+         (let pp fmt = function
+            | RootCause -> Format.pp_print_string fmt "root"
+            | NoVersions -> Format.pp_print_string fmt "no versions"
+            | Dependency dep ->
+                Format.fprintf fmt "dependency %a" (Repr.pp dependency_t) dep
+            | Derived (i1, i2) ->
+                Format.fprintf fmt "(%a and %a)" (Repr.pp incompatibility_t) i1
+                  (Repr.pp incompatibility_t) i2
+          in
+          Repr.like ~pp cause_t))
+      cause
+  in
+  Repr.like ~pp incompatibility_t
+
+let incompatibilities_t =
+  let pp fmt incomps =
+    Format.fprintf fmt "%a"
+      Format.(
+        pp_print_list
+          ~pp_sep:(fun fmt () -> Format.pp_print_string fmt "\n\t")
+          (fun fmt i -> fprintf fmt "%a" (Repr.pp incompatibility_t) i))
+      incomps
+  in
+  Repr.like ~pp (Repr.list incompatibility_t)
+
+let assignment_t =
+  let pp fmt = function
+    | Decision package -> Format.fprintf fmt "Decision %a" (Repr.pp package_t) package
+    | Derivation (term, cause) ->
+        Format.fprintf fmt "Derivation %a due to incompatibility %a" (Repr.pp term_t) term
+          (Repr.pp incompatibility_t) cause
+  in
+  Repr.like ~pp assignment_t
+
+let debug_enabled = ref false
+
+let debug_printf fmt =
+  if !debug_enabled then
+    Format.kfprintf
+      (fun _ -> Format.pp_print_flush Format.std_formatter ())
+      Format.std_formatter fmt
+  else Format.ifprintf Format.std_formatter fmt
+
+let set_debug enabled = debug_enabled := enabled
 let intersect a b = List.filter (fun e -> List.mem e b) a
 let subset a b = List.for_all (fun e -> List.mem e b) a
 let disjoint a b = not (List.exists (fun e -> List.mem e b) a)
@@ -276,7 +374,6 @@ let make_decision available_versions dependencies state =
         match find_versions name state.solution with
         | Ok (Some (pvs, nvs)) ->
             let vs = minus pvs nvs in
-            debug_printf "vs %a\n" Repr.(pp (list version_t)) vs;
             Some (name, vs)
         | _ -> None)
     | _ :: solution -> find_undecided_term solution
@@ -310,9 +407,10 @@ let make_decision available_versions dependencies state =
             })
           (Hashtbl.find_all dependencies (name, version))
       in
-      debug_printf "added dependency incompatibilities %a\n"
-        Repr.(pp (list incompatibility_t))
-        dep_incomps;
+      if List.length dep_incomps > 0 then
+        debug_printf "added dependency incompatibilities\n\t%a\n"
+          Repr.(pp incompatibilities_t)
+          dep_incomps;
       let incomps = dep_incomps @ state.incomps in
       let solution, decision_level =
         let decision_level = state.decision_level + 1 in
@@ -364,7 +462,7 @@ let solve (available_versions : available_versions) (dependencies : dependencies
         | Some (next, state) -> solve_loop state next)
   in
   let incomps = init_incomps dependencies in
-  debug_printf "initial incompatibilities %a\n" Repr.(pp (list incompatibility_t)) incomps;
+  debug_printf "initial incompatibilities %a\n" Repr.(pp incompatibilities_t) incomps;
   solve_loop { incomps; solution = []; decision_level = 0 } RootName
 
 (* TODO *)
@@ -372,8 +470,7 @@ let rec explain_incompatibility fmt incompat =
   match incompat.cause with
   | RootCause -> Format.fprintf fmt "root"
   | Dependency dependency -> Format.fprintf fmt "Dep %a" (Repr.pp dependency_t) dependency
-  | NoVersions ->
-      Format.fprintf fmt "%a not available" Repr.(pp (list term_t)) incompat.terms
+  | NoVersions -> Format.fprintf fmt "%a not available" Repr.(pp terms_t) incompat.terms
   | Derived (cause1, cause2) ->
       Format.fprintf fmt "(%a && %a)" explain_incompatibility cause1
         explain_incompatibility cause2
