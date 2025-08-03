@@ -15,8 +15,6 @@ depends: [
   "menhir"
   "format"
   "cmdliner"
-  "repr"
-  "ppx_repr"
   "odoc" {with-doc}
 ]
 build: [

@@ -5,6 +5,4 @@
 
 (library
  (name pac)
- (preprocess
-  (pps ppx_repr))
  (modules ast lexer parser util core concurrent pubgrub import))
