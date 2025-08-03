@@ -74,7 +74,6 @@ let pp_terms fmt terms =
         (fun fmt t -> fprintf fmt "%a" pp_term t))
     terms
 
-(* TODO proper recursion *)
 let rec pp_cause fmt = function
   | RootCause -> Format.pp_print_string fmt "root"
   | NoVersions -> Format.pp_print_string fmt "no versions"
@@ -387,7 +386,7 @@ let make_decision available_versions dependencies state =
                 let state = { incomps; solution; decision_level } in
                 Some (name, state))
       in
-      (* TODO prioritise versions *)
+      (* TODO version ordering *)
       try_versions state (List.sort (fun a b -> compare b a) real_vs)
 
 let extract_resolution state =
