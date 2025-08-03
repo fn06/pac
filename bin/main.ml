@@ -12,7 +12,6 @@ let process_file filename =
     raise e
 
 let parse_package str = Parser.package Lexer.read (Lexing.from_string str)
-
 let parse_query str = Parser.query Lexer.read (Lexing.from_string str)
 
 let parse_cmd filename =

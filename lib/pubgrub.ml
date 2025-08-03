@@ -70,7 +70,7 @@ let package_t =
 
 let dependency_t =
   let pp fmt (p, (n, vs)) =
-    Format.fprintf fmt "%a Δ %a %a" (Repr.pp package_t) p (Repr.pp name_t) n
+    Format.fprintf fmt "%a -> %a %a" (Repr.pp package_t) p (Repr.pp name_t) n
       Repr.(pp versions_t)
       vs
   in
@@ -191,6 +191,7 @@ let term_satisfied_by_solution term solution =
   in
   (* find compatible versions of name in solution *)
   let pol, name, vs = term in
+  (* debug_printf "%a\n" (Repr.pp term_t) term; *)
   match solution_versions name solution with
   | None -> false
   | Some (pvs', nvs') -> (
@@ -346,8 +347,23 @@ and incompat_propagation state changed = function
             let solution = (assignment, state.decision_level) :: state.solution in
             let state = { state with solution } in
             let _, name, _ = term in
-            unit_propagation state (name :: changed)
+            incompat_propagation state (name :: changed) incomps
         | _ -> incompat_propagation state changed incomps)
+
+let dependency_incomps dependencies (name, version) =
+  List.map
+    (fun (dep_name, dep_versions) ->
+      {
+        terms =
+          [
+            (* If this package is selected, *)
+            (Pos, name, [ version ]);
+            (* then we can't not have a compatible dependency *)
+            (Neg, dep_name, dep_versions);
+          ];
+        cause = Dependency ((name, version), (dep_name, dep_versions));
+      })
+    (Hashtbl.find_all dependencies (name, version))
 
 let make_decision available_versions dependencies state =
   (* Find a name that has positive derivations but no decision and collect it's versions *)
@@ -370,13 +386,12 @@ let make_decision available_versions dependencies state =
   in
   let rec find_undecided_term = function
     | [] -> None
-    | (Derivation ((Pos, name, _), _), _) :: solution -> (
+    | (Derivation ((Pos, name, _), _), _) :: solution when name != RootName -> (
         match find_versions name state.solution with
         | Ok (Some (pvs, nvs)) ->
             let vs = minus pvs nvs in
             Some (name, vs)
-        | _ ->
-            find_undecided_term solution)
+        | _ -> find_undecided_term solution)
     | _ :: solution -> find_undecided_term solution
   in
   let* name, vs = find_undecided_term state.solution in
@@ -384,50 +399,39 @@ let make_decision available_versions dependencies state =
   (* Filter to only versions that are actually available *)
   let real_vs = intersect (Hashtbl.find_all available_versions name) vs in
   (* TODO prioritise versions *)
-  match real_vs with
+  match List.sort (fun a b -> compare b a) real_vs with
   | [] ->
+      (* TODO convince myself that this isn't an issue: what if we backtrack the previous assignments?  *)
       let incomp = { terms = [ (Pos, name, vs) ]; cause = NoVersions } in
-      debug_printf "no versions found, adding incompatiblity %a\n"
+      debug_printf "\nno versions found, adding incompatiblity %a\n"
         (Repr.pp incompatibility_t) incomp;
       let state = { state with incomps = incomp :: state.incomps } in
       Some (name, state)
-  | version :: _ ->
-      debug_printf "trying version %a\n" (Repr.pp version_t) version;
-      let dep_incomps =
-        List.map
-          (fun (dep_name, dep_versions) ->
-            {
-              terms =
-                [
-                  (* If this package is selected, *)
-                  (Pos, name, [ version ]);
-                  (* then we can't not have a compatible dependency *)
-                  (Neg, dep_name, dep_versions);
-                ];
-              cause = Dependency ((name, version), (dep_name, dep_versions));
-            })
-          (Hashtbl.find_all dependencies (name, version))
+  | _ :: _ as versions ->
+      let rec try_versions = function
+        | [] -> Some (name, state)
+        | version :: versions -> (
+            debug_printf "trying version %a\n" (Repr.pp version_t) version;
+            let dep_incomps = dependency_incomps dependencies (name, version) in
+            if List.length dep_incomps > 0 then
+              debug_printf "dependency incompatibilities\n\t%a\n"
+                Repr.(pp incompatibilities_t)
+                dep_incomps;
+            let incomps = dep_incomps @ state.incomps in
+            let decision_level = state.decision_level + 1 in
+            let assignment = Decision (name, version) in
+            let solution = (assignment, decision_level) :: state.solution in
+            match List.find_opt (incompatibility_satisfied solution) incomps with
+            | Some incomp ->
+                debug_printf "not adding due to incompatibility %a\n"
+                  (Repr.pp incompatibility_t) incomp;
+                try_versions versions
+            | None ->
+                debug_printf "assignment %a\n" (Repr.pp assignment_t) assignment;
+                let state = { incomps; solution; decision_level } in
+                Some (name, state))
       in
-      if List.length dep_incomps > 0 then
-        debug_printf "added dependency incompatibilities\n\t%a\n"
-          Repr.(pp incompatibilities_t)
-          dep_incomps;
-      let incomps = dep_incomps @ state.incomps in
-      let solution, decision_level =
-        let decision_level = state.decision_level + 1 in
-        let assignment = Decision (name, version) in
-        let solution = (assignment, decision_level) :: state.solution in
-        match List.find_opt (incompatibility_satisfied solution) incomps with
-        | Some incomp ->
-            debug_printf "not adding due to incompatibility %a\n"
-              (Repr.pp incompatibility_t) incomp;
-            (state.solution, state.decision_level)
-        | None ->
-            debug_printf "adding decision %a\n" (Repr.pp assignment_t) assignment;
-            (solution, decision_level)
-      in
-      let state = { incomps; solution; decision_level } in
-      Some (name, state)
+      try_versions versions
 
 let extract_resolution state =
   List.filter_map

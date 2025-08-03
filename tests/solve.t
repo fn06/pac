@@ -1,3 +1,5 @@
+  $ pac solve -f simple.pac -q 'foo ( 1.0.0 )'
+  $ pac solve -f conflict-avoidance.pac -q 'foo ( 1.0.0 1.1.0 ) bar ( 1.0.0 1.1.0 )'
   $ pac solve -f example.pac -q 'A ( 1 )'
   B 1, D 2, C 1, A 1
   $ pac solve -f circular.pac -q 'A ( 1 )'
