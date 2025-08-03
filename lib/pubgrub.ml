@@ -111,9 +111,10 @@ let terms_t =
   in
   Repr.like ~pp (Repr.list term_t)
 
+(* TODO proper recursion *)
 let incompatibility_t =
   let pp fmt { terms; cause } =
-    Format.fprintf fmt "(terms: %a, cause: (%a)" (Repr.pp terms_t) terms
+    Format.fprintf fmt "(terms: %a, cause: %a)" (Repr.pp terms_t) terms
       (Repr.pp
          (let pp fmt = function
             | RootCause -> Format.pp_print_string fmt "root"
@@ -149,6 +150,16 @@ let assignment_t =
   in
   Repr.like ~pp assignment_t
 
+let _solution_t =
+  let pp fmt =
+    Format.(
+      pp_print_list
+        ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
+        (fun fmt (a, d) -> fprintf fmt "(%d: %a)" d (Repr.pp assignment_t) a))
+      fmt
+  in
+  Repr.like ~pp solution_t
+
 let debug_enabled = ref false
 
 let debug_printf fmt =
@@ -177,25 +188,25 @@ end)
 
 let term_satisfied_by_solution term solution =
   let rec solution_versions name = function
-    | [] -> None
-    | (Decision (n, v), _) :: _ when n = name -> Some ([ v ], [])
+    | [] -> (None, None)
+    | (Decision (n, v), _) :: _ when n = name -> (Some [ v ], None)
     | (Derivation ((Pos, n, pvs), _), _) :: solution when n = name -> (
         match solution_versions name solution with
-        | None -> Some (pvs, [])
-        | Some (vs', nvs) -> Some (intersect pvs vs', nvs))
+        | None, nvs -> (Some pvs, nvs)
+        | Some pvs', nvs -> (Some (intersect pvs pvs'), nvs))
     | (Derivation ((Neg, n, nvs), _), _) :: solution when n = name -> (
         match solution_versions name solution with
-        | None -> Some ([], nvs)
-        | Some (vs', nvs') -> Some (vs', intersect nvs nvs'))
+        | pvs, None -> (pvs, Some nvs)
+        | pvs', Some nvs' -> (pvs', Some (intersect nvs nvs')))
     | _ :: solution -> solution_versions name solution
   in
   (* find compatible versions of name in solution *)
   let pol, name, vs = term in
-  (* debug_printf "%a\n" (Repr.pp term_t) term; *)
   match solution_versions name solution with
-  | None -> false
-  | Some (pvs', nvs') -> (
-      let vs' = minus pvs' nvs' in
+  | None, None -> false
+  | None, Some nvs' -> ( match pol with Neg -> subset nvs' vs | Pos -> false)
+  | Some pvs', nvs' -> (
+      let vs' = match nvs' with Some nvs' -> minus pvs' nvs' | None -> pvs' in
       match pol with Pos -> subset vs' vs | Neg -> disjoint vs' vs)
 
 let term_contradicted_by_solution term solution =
@@ -395,20 +406,19 @@ let make_decision available_versions dependencies state =
     | _ :: solution -> find_undecided_term solution
   in
   let* name, vs = find_undecided_term state.solution in
-  debug_printf "deciding on %a\n" (Repr.pp name_t) name;
+  debug_printf "deciding on %a: %a\n" (Repr.pp name_t) name (Repr.pp versions_t) vs;
+  let decision_level = state.decision_level + 1 in
   (* Filter to only versions that are actually available *)
   let real_vs = intersect (Hashtbl.find_all available_versions name) vs in
-  (* TODO prioritise versions *)
-  match List.sort (fun a b -> compare b a) real_vs with
+  match real_vs with
   | [] ->
-      (* TODO convince myself that this isn't an issue: what if we backtrack the previous assignments?  *)
       let incomp = { terms = [ (Pos, name, vs) ]; cause = NoVersions } in
-      debug_printf "\nno versions found, adding incompatiblity %a\n"
+      debug_printf "no versions found, adding incompatiblity %a\n"
         (Repr.pp incompatibility_t) incomp;
       let state = { state with incomps = incomp :: state.incomps } in
       Some (name, state)
-  | _ :: _ as versions ->
-      let rec try_versions = function
+  | _ ->
+      let rec try_versions state = function
         | [] -> Some (name, state)
         | version :: versions -> (
             debug_printf "trying version %a\n" (Repr.pp version_t) version;
@@ -418,20 +428,22 @@ let make_decision available_versions dependencies state =
                 Repr.(pp incompatibilities_t)
                 dep_incomps;
             let incomps = dep_incomps @ state.incomps in
-            let decision_level = state.decision_level + 1 in
+            let state = { state with incomps } in
             let assignment = Decision (name, version) in
             let solution = (assignment, decision_level) :: state.solution in
             match List.find_opt (incompatibility_satisfied solution) incomps with
             | Some incomp ->
                 debug_printf "not adding due to incompatibility %a\n"
                   (Repr.pp incompatibility_t) incomp;
-                try_versions versions
+                try_versions state versions
             | None ->
-                debug_printf "assignment %a\n" (Repr.pp assignment_t) assignment;
+                debug_printf "assignment on level %d: %a\n" decision_level
+                  (Repr.pp assignment_t) assignment;
                 let state = { incomps; solution; decision_level } in
                 Some (name, state))
       in
-      try_versions versions
+      (* TODO prioritise versions *)
+      try_versions state (List.sort (fun a b -> compare b a) real_vs)
 
 let extract_resolution state =
   List.filter_map
@@ -467,7 +479,7 @@ let solve (available_versions : available_versions) (dependencies : dependencies
         | Some (next, state) -> solve_loop state next)
   in
   let incomps = init_incomps dependencies in
-  debug_printf "initial incompatibilities %a\n" Repr.(pp incompatibilities_t) incomps;
+  debug_printf "initial incompatibilities\n\t%a\n" Repr.(pp incompatibilities_t) incomps;
   solve_loop { incomps; solution = []; decision_level = 0 } RootName
 
 (* TODO *)
