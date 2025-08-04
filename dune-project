@@ -1,20 +1,19 @@
 (lang dune 3.18)
 (using menhir 3.0)
+(cram enable)
 
 (name pac)
 
-(generate_opam_files true)
-
 (source
- (github username/reponame))
+ (github fn06/pac))
 
-(authors "Author Name <author@example.com>")
+(authors "Ryan Gibb <ryan@freumh.org>")
 
-(maintainers "Maintainer Name <maintainer@example.com>")
+(maintainers "Ryan Gibb <ryan@freumh.org>")
 
-(license LICENSE)
+(license MIT)
 
-(documentation https://url/to/documentation)
+(documentation https://github.com/fn06/pac)
 
 (package
  (name pac)
@@ -23,5 +22,3 @@
  (depends ocaml menhir format cmdliner)
  (tags
   ("add topics" "to describe" your project)))
-
-; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

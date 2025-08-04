@@ -3,10 +3,17 @@
 %token EOF
 
 %start <Ast.expression> expression
+%start <Ast.package> package
+%start <Ast.query> query
 %%
 
 expression:
   | e = dependencies; EOF { e }
+
+query:
+  | q = targets; EOF { q }
+
+/* TODO syntax for extensions */
 
 dependencies:
   | { [  ] }
@@ -21,6 +28,8 @@ target:
 targets:
   | { [] }
   | t = target; ts = targets   { t :: ts }
+
+/* TODO version formula */
 
 versions:
   | v = WORD { [ v ] }
