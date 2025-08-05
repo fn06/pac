@@ -160,12 +160,22 @@ let term_contradicted_by_solution term solution =
 let incompatibility_satisfied solution incomp =
   List.for_all (fun term -> term_satisfied_by_solution term solution) incomp.terms
 
-let get_unsatisfied_terms solution incomp =
-  List.filter
-    (fun t ->
-      (not (term_satisfied_by_solution t solution))
-      && not (term_contradicted_by_solution t solution))
-    incomp.terms
+let get_almost_satisfied_term solution incomp =
+  match
+    List.fold_left
+      (fun acc t ->
+        let> sat = acc in
+        if term_contradicted_by_solution t solution then Error None
+        else
+          match (sat, term_satisfied_by_solution t solution) with
+          | None, false -> Ok (Some t)
+          | Some _, false -> Error None
+          | Some sat, true -> Ok (Some sat)
+          | None, true -> Ok None)
+      (Ok None) incomp.terms
+  with
+  | Ok (Some t) -> Some t
+  | _ -> None
 
 let normalise_terms terms =
   let tbl = Hashtbl.create (List.length terms) in
@@ -295,8 +305,8 @@ and incompat_propagation state changed = function
             unit_propagation state [ name ]
         | Error incomp -> Error incomp
       else
-        match get_unsatisfied_terms state.solution incomp with
-        | [ term ] ->
+        match get_almost_satisfied_term state.solution incomp with
+        | Some term ->
             let assignment = Derivation (negate_term term, incomp) in
             debug_printf "new assignment on level %d: %a\n" state.decision_level
               pp_assignment assignment;
@@ -304,7 +314,7 @@ and incompat_propagation state changed = function
             let state = { state with solution } in
             let _, name, _ = term in
             incompat_propagation state (name :: changed) incomps
-        | _ -> incompat_propagation state changed incomps)
+        | None -> incompat_propagation state changed incomps)
 
 let dependency_incomps dependencies (name, version) =
   List.map

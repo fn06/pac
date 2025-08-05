@@ -17,7 +17,6 @@ type cause =
 and incompatibility = { terms : term list; cause : cause }
 
 val pp_resolution : Format.formatter -> (name * version) list -> unit
-
 val set_debug : bool -> unit
 val solve : available_versions -> dependencies -> (package list, incompatibility) Result.t
 val explain_incompatibility : Format.formatter -> incompatibility -> unit
