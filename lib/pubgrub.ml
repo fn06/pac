@@ -48,7 +48,9 @@ let pp_versions fmt vs =
         (fun fmt v -> fprintf fmt "%a" pp_version v))
     vs
 
-let pp_package fmt (n, v) = Format.fprintf fmt "%a %a" pp_name n pp_version v
+let pp_package fmt = function
+  | RootName, RootVersion -> Format.fprintf fmt "root"
+  | n, v -> Format.fprintf fmt "%a %a" pp_name n pp_version v
 
 let pp_dependency fmt (p, (n, vs)) =
   Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
@@ -436,12 +438,123 @@ let solve (available_versions : available_versions) (dependencies : dependencies
   debug_printf "initial incompatibilities\n\t%a\n" pp_incompatibilities incomps;
   solve_loop { incomps; solution = []; decision_level = 0 } RootName
 
-(* TODO *)
-let rec explain_incompatibility fmt incompat =
-  match incompat.cause with
-  | RootCause -> Format.fprintf fmt "root"
-  | Dependency dependency -> Format.fprintf fmt "Dep %a" pp_dependency dependency
-  | NoVersions -> Format.fprintf fmt "%a not available" pp_terms incompat.terms
-  | Derived (cause1, cause2) ->
-      Format.fprintf fmt "(%a && %a)" explain_incompatibility cause1
-        explain_incompatibility cause2
+let explain_terms fmt = function
+  | [ (Pos, n, vs); (Neg, m, us) ] | [ (Neg, m, us); (Pos, n, vs) ] ->
+      Format.fprintf fmt "%a %a requires %a %a" pp_name n pp_versions vs pp_name m pp_versions
+        us
+  | [] | [ (Pos, RootName, [ RootVersion ]) ] -> Format.fprintf fmt "version solving failed."
+  | terms ->
+  Format.fprintf fmt "%a is forbidden."
+    Format.(
+      pp_print_list
+        ~pp_sep:(fun fmt () -> Format.pp_print_string fmt " or ")
+        (fun fmt t -> fprintf fmt "%a" pp_term t))
+    terms
+
+let explain_incompatibility fmt root =
+  let line_numbers = Hashtbl.create 16 in
+  let line_number = ref 0 in
+  let set_line_number cause =
+    incr line_number;
+    Hashtbl.add line_numbers cause !line_number;
+    !line_number
+  in
+  let is_external incomp = match incomp.cause with Derived _ -> false | _ -> true in
+  let rec count_caused incomp = function
+    | Derived (c1, c2) ->
+        (if c1 == incomp then 1 else 0)
+        + (if c2 == incomp then 1 else 0)
+        + count_caused incomp c1.cause + count_caused incomp c2.cause
+    | _ -> 0
+  in
+  let rec explain_incomp fmt incomp =
+    match incomp.cause with
+    | RootCause -> Format.fprintf fmt "root"
+    | NoVersions -> Format.fprintf fmt "%a not available" explain_terms incomp.terms
+    | Dependency (p, (n, vs)) -> Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
+    | Derived (cause1, cause2) ->
+        (match (is_external cause1, is_external cause2) with
+        (* Case 1 *)
+        | false, false -> (
+            match
+              (Hashtbl.find_opt line_numbers cause1, Hashtbl.find_opt line_numbers cause1)
+            with
+            | Some line1, Some line2 ->
+                (* Case 1.i *)
+                Format.fprintf fmt "Because %a (%d) and %a (%d), %a." explain_terms
+                  cause1.terms line1 explain_terms cause2.terms line2 explain_terms
+                  incomp.terms
+            (* Case 1.ii *)
+            | Some line1, None ->
+                Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp cause2
+                  explain_terms cause1.terms line1 explain_terms incomp.terms
+            | None, Some line2 ->
+                Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp cause1
+                  explain_terms cause2.terms line2 explain_terms incomp.terms
+            (* Case 1.iii *)
+            | None, None -> (
+                let is_simple incomp =
+                  match incomp.cause with
+                  | Derived (c1, c2) -> is_external c1 && is_external c2
+                  | _ -> true
+                in
+                match
+                  match (is_simple cause1, is_simple cause2) with
+                  | true, _ -> Some (cause1, cause2)
+                  | false, true -> Some (cause2, cause1)
+                  | false, false -> None
+                with
+                (* Case 1.iii.a *)
+                | Some (simple, complex) ->
+                    Format.fprintf fmt "%a\n%a\nThus, %a" explain_incomp complex
+                      explain_incomp simple explain_terms incomp.terms
+                (* Case 1.iii.b *)
+                | None ->
+                    let line1 = set_line_number cause1 in
+                    let line2 = set_line_number cause2 in
+                    Format.fprintf fmt "%a (%d)\n\n%a (%d)\nThus, %a" explain_incomp
+                      cause1 line1 explain_incomp cause2 line2 explain_terms incomp.terms)
+            )
+        (* Case 2 *)
+        | false, _ | _, false -> (
+            let derived, ext =
+              if is_external cause1 then (cause2, cause1) else (cause1, cause2)
+            in
+            match Hashtbl.find_opt line_numbers derived with
+            (* Case 2.i *)
+            | Some line ->
+                Format.fprintf fmt "Because %a and %a (%d), %a" explain_incomp ext
+                  explain_terms derived.terms line explain_terms incomp.terms
+            | None -> (
+                match
+                  match derived.cause with
+                  | Derived (c1, c2) -> (
+                      let* derived, ext =
+                        match (is_external c1, is_external c2) with
+                        | true, false -> Some (c2, c1)
+                        | false, true -> Some (c1, c2)
+                        | _ -> None
+                      in
+                      match Hashtbl.find_opt line_numbers derived with
+                      | None -> Some (derived, ext)
+                      | _ -> None)
+                  | _ -> None
+                with
+                (* Case 2.ii *)
+                | Some (prior_derived, prior_external) ->
+                    Format.fprintf fmt "%a\nAnd because %a and %a, %a" explain_incomp
+                      prior_derived explain_incomp prior_external explain_incomp ext
+                      explain_terms incomp.terms
+                (* Case 2.iii *)
+                | _ ->
+                    Format.fprintf fmt "%a\nAnd because %a, %a" explain_incomp derived
+                      explain_incomp ext explain_terms incomp.terms))
+        (* Case 3 *)
+        | true, true ->
+            Format.fprintf fmt "Because %a and %a, %a." explain_incomp cause1
+              explain_incomp cause2 explain_terms incomp.terms);
+        if count_caused incomp root.cause > 1 then
+          Format.fprintf fmt " (%d)" (set_line_number incomp)
+        else ()
+  in
+  explain_incomp fmt root

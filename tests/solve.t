@@ -1,10 +1,10 @@
   $ pac solve -f example.pac -q 'A ( 1 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not A (1)}, cause: dependency Root Root -> A (1))
+  	(terms: {Root (Root), not A (1)}, cause: dependency root -> A (1))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation A (1) due to incompatibility (terms: {Root (Root), not A (1)}, cause: dependency Root Root -> A (1))
+  new assignment on level 0: Derivation A (1) due to incompatibility (terms: {Root (Root), not A (1)}, cause: dependency root -> A (1))
   unit propagation on: A
   unit propagation on: Root
   deciding on A: (1)
@@ -40,10 +40,10 @@
   $ pac solve -f simple.pac -q 'foo ( 1.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: foo
   unit propagation on: Root
   deciding on foo: (1.0.0)
@@ -62,12 +62,12 @@
   $ pac solve -f conflict-avoidance.pac -q 'foo ( 1.0.0 1.1.0 ) bar ( 1.0.0 1.1.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not bar (1.0.0, 1.1.0)}, cause: dependency Root Root -> bar (1.0.0, 1.1.0))
-  	(terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency Root Root -> foo (1.0.0, 1.1.0))
+  	(terms: {Root (Root), not bar (1.0.0, 1.1.0)}, cause: dependency root -> bar (1.0.0, 1.1.0))
+  	(terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency root -> foo (1.0.0, 1.1.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation bar (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not bar (1.0.0, 1.1.0)}, cause: dependency Root Root -> bar (1.0.0, 1.1.0))
-  new assignment on level 0: Derivation foo (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency Root Root -> foo (1.0.0, 1.1.0))
+  new assignment on level 0: Derivation bar (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not bar (1.0.0, 1.1.0)}, cause: dependency root -> bar (1.0.0, 1.1.0))
+  new assignment on level 0: Derivation foo (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency root -> foo (1.0.0, 1.1.0))
   unit propagation on: foo
   unit propagation on: bar
   unit propagation on: Root
@@ -87,10 +87,10 @@
   $ pac solve -f conflict.pac -q 'foo ( 1.0.0 2.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not foo (1.0.0, 2.0.0)}, cause: dependency Root Root -> foo (1.0.0, 2.0.0))
+  	(terms: {Root (Root), not foo (1.0.0, 2.0.0)}, cause: dependency root -> foo (1.0.0, 2.0.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation foo (1.0.0, 2.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 2.0.0)}, cause: dependency Root Root -> foo (1.0.0, 2.0.0))
+  new assignment on level 0: Derivation foo (1.0.0, 2.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 2.0.0)}, cause: dependency root -> foo (1.0.0, 2.0.0))
   unit propagation on: foo
   unit propagation on: Root
   deciding on foo: (1.0.0, 2.0.0)
@@ -116,13 +116,11 @@
   new incompatibility (terms: {foo (2.0.0)}, cause: ((terms: {bar (1.0.0), not foo (1.0.0)}, cause: dependency bar 1.0.0 -> foo (1.0.0)) and (terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))))
   new assignment on level 0: Derivation not foo (2.0.0) due to incompatibility (terms: {foo (2.0.0)}, cause: ((terms: {bar (1.0.0), not foo (1.0.0)}, cause: dependency bar 1.0.0 -> foo (1.0.0)) and (terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))))
   unit propagation on: foo
-  new assignment on level 0: Derivation not bar (1.0.0) due to incompatibility (terms: {bar (1.0.0), not foo (1.0.0)}, cause: dependency bar 1.0.0 -> foo (1.0.0))
-  unit propagation on: bar
   deciding on foo: (1.0.0, 2.0.0)
   trying version 2.0.0
   dependency incompatibilities
   	(terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))
-  not adding due to incompatibility (terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))
+  not adding due to incompatibility (terms: {foo (2.0.0)}, cause: ((terms: {bar (1.0.0), not foo (1.0.0)}, cause: dependency bar 1.0.0 -> foo (1.0.0)) and (terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))))
   trying version 1.0.0
   assignment on level 1: Decision foo 1.0.0
   unit propagation on: foo
@@ -130,12 +128,12 @@
   $ pac solve -f conflict-partial-satisfier.pac -q 'foo ( 1.0.0 1.1.0 ) target ( 2.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not target (2.0.0)}, cause: dependency Root Root -> target (2.0.0))
-  	(terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency Root Root -> foo (1.0.0, 1.1.0))
+  	(terms: {Root (Root), not target (2.0.0)}, cause: dependency root -> target (2.0.0))
+  	(terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency root -> foo (1.0.0, 1.1.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation target (2.0.0) due to incompatibility (terms: {Root (Root), not target (2.0.0)}, cause: dependency Root Root -> target (2.0.0))
-  new assignment on level 0: Derivation foo (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency Root Root -> foo (1.0.0, 1.1.0))
+  new assignment on level 0: Derivation target (2.0.0) due to incompatibility (terms: {Root (Root), not target (2.0.0)}, cause: dependency root -> target (2.0.0))
+  new assignment on level 0: Derivation foo (1.0.0, 1.1.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0, 1.1.0)}, cause: dependency root -> foo (1.0.0, 1.1.0))
   unit propagation on: foo
   unit propagation on: target
   unit propagation on: Root
@@ -207,12 +205,12 @@
   $ pac solve -f linear-error.pac -q 'foo ( 1.0.0 ) baz ( 1.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not baz (1.0.0)}, cause: dependency Root Root -> baz (1.0.0))
-  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  	(terms: {Root (Root), not baz (1.0.0)}, cause: dependency root -> baz (1.0.0))
+  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation baz (1.0.0) due to incompatibility (terms: {Root (Root), not baz (1.0.0)}, cause: dependency Root Root -> baz (1.0.0))
-  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  new assignment on level 0: Derivation baz (1.0.0) due to incompatibility (terms: {Root (Root), not baz (1.0.0)}, cause: dependency root -> baz (1.0.0))
+  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: foo
   unit propagation on: baz
   unit propagation on: Root
@@ -239,20 +237,21 @@
   satisfiying assignment on level 0: Derivation not bar (2.0.0) due to incompatibility (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0))
   prior cause (terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0))))
   conflict resolution on: (terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0))))
-  satisfiying assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
-  prior cause (terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))))
-  conflict resolution on: (terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))))
-  satisfiying assignment on level 0: Derivation baz (1.0.0) due to incompatibility (terms: {Root (Root), not baz (1.0.0)}, cause: dependency Root Root -> baz (1.0.0))
-  prior cause (terms: {Root (Root)}, cause: ((terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0)))) and (terms: {Root (Root), not baz (1.0.0)}, cause: dependency Root Root -> baz (1.0.0))))
-  conflict resolution on: (terms: {Root (Root)}, cause: ((terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0)))) and (terms: {Root (Root), not baz (1.0.0)}, cause: dependency Root Root -> baz (1.0.0))))
-  (((Dep foo 1.0.0 -> bar (2.0.0) && Dep bar 2.0.0 -> baz (3.0.0)) && Dep Root Root -> foo (1.0.0)) && Dep Root Root -> baz (1.0.0))
+  satisfiying assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
+  prior cause (terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))))
+  conflict resolution on: (terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))))
+  satisfiying assignment on level 0: Derivation baz (1.0.0) due to incompatibility (terms: {Root (Root), not baz (1.0.0)}, cause: dependency root -> baz (1.0.0))
+  prior cause (terms: {Root (Root)}, cause: ((terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0)))) and (terms: {Root (Root), not baz (1.0.0)}, cause: dependency root -> baz (1.0.0))))
+  conflict resolution on: (terms: {Root (Root)}, cause: ((terms: {not baz (3.0.0), Root (Root)}, cause: ((terms: {not baz (3.0.0), foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not bar (2.0.0)}, cause: dependency foo 1.0.0 -> bar (2.0.0)) and (terms: {bar (2.0.0), not baz (3.0.0)}, cause: dependency bar 2.0.0 -> baz (3.0.0)))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0)))) and (terms: {Root (Root), not baz (1.0.0)}, cause: dependency root -> baz (1.0.0))))
+  Because foo 1.0.0 -> bar (2.0.0) and bar 2.0.0 -> baz (3.0.0), foo (1.0.0) requires baz (3.0.0).
+  And because root -> foo (1.0.0) and root -> baz (1.0.0), version solving failed.
   $ pac solve -f branching-error.pac -q 'foo ( 1.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
-  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  	(terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: Root
   new assignment on level 0: Derivation Root (Root) due to incompatibility (terms: {not Root (Root)}, cause: root)
-  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
+  new assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
   unit propagation on: foo
   unit propagation on: Root
   deciding on foo: (1.0.0)
@@ -281,12 +280,12 @@
   new incompatibility (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0))))
   new assignment on level 0: Derivation b (2.0.0) due to incompatibility (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0))))
   unit propagation on: b
-  new assignment on level 0: Derivation not a (1.0.0) due to incompatibility (terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0))
   conflict resolution on: (terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0))
   satisfiying assignment on level 0: Derivation b (2.0.0) due to incompatibility (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0))))
   prior cause (terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0))))))
   conflict resolution on: (terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0))))))
-  satisfiying assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))
-  prior cause (terms: {Root (Root)}, cause: ((terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0)))))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))))
-  conflict resolution on: (terms: {Root (Root)}, cause: ((terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0)))))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency Root Root -> foo (1.0.0))))
-  ((Dep foo 1.0.0 -> b (1.0.0) && (Dep a 1.0.0 -> b (2.0.0) && Dep foo 1.0.0 -> a (1.0.0))) && Dep Root Root -> foo (1.0.0))
+  satisfiying assignment on level 0: Derivation foo (1.0.0) due to incompatibility (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))
+  prior cause (terms: {Root (Root)}, cause: ((terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0)))))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))))
+  conflict resolution on: (terms: {Root (Root)}, cause: ((terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0)))))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))))
+  Because a 1.0.0 -> b (2.0.0) and foo 1.0.0 -> a (1.0.0), foo (1.0.0) requires b (2.0.0).
+  And because foo 1.0.0 -> b (1.0.0) and root -> foo (1.0.0), version solving failed.
