@@ -133,7 +133,7 @@ module NameMap = Map.Make (struct
   let compare = compare
 end)
 
-let term_satisfied_by_solution term solution =
+let term_status solution term =
   let rec solution_versions name = function
     | [] -> (None, None)
     | (Decision (n, v), _) :: _ when n = name -> (Some [ v ], None)
@@ -150,34 +150,34 @@ let term_satisfied_by_solution term solution =
   (* find compatible versions of name in solution *)
   let pol, name, vs = term in
   match solution_versions name solution with
-  | None, None -> false
-  | None, Some nvs' -> ( match pol with Neg -> subset nvs' vs | Pos -> false)
+  | None, None -> `Undetermined
+  | None, Some nvs' -> (
+      match pol with
+      | Neg -> if subset nvs' vs then `Satisfied else `Undetermined
+      | Pos -> `Contradicted)
   | Some pvs', nvs' -> (
       let vs' = match nvs' with Some nvs' -> minus pvs' nvs' | None -> pvs' in
-      match pol with Pos -> subset vs' vs | Neg -> disjoint vs' vs)
+      match (pol, subset vs' vs, disjoint vs' vs) with
+      | Pos, true, _ -> `Satisfied
+      | Pos, _, true -> `Contradicted
+      | Neg, _, true -> `Satisfied
+      | Neg, true, _ -> `Contradicted
+      | _, false, false -> `Undetermined)
 
-let term_contradicted_by_solution term solution =
-  term_satisfied_by_solution (negate_term term) solution
-
-let incompatibility_satisfied solution incomp =
-  List.for_all (fun term -> term_satisfied_by_solution term solution) incomp.terms
-
-let get_almost_satisfied_term solution incomp =
-  match
-    List.fold_left
-      (fun acc t ->
-        let> sat = acc in
-        if term_contradicted_by_solution t solution then Error None
-        else
-          match (sat, term_satisfied_by_solution t solution) with
-          | None, false -> Ok (Some t)
-          | Some _, false -> Error None
-          | Some sat, true -> Ok (Some sat)
-          | None, true -> Ok None)
-      (Ok None) incomp.terms
-  with
-  | Ok (Some t) -> Some t
-  | _ -> None
+let incompatibility_status solution incomp =
+  let rec aux s = function
+    | [] -> s
+    | t :: ts -> (
+        match (s, term_status solution t) with
+        | `Satisfied, `Satisfied -> aux `Satisfied ts
+        | `Satisfied, `Undetermined -> aux (`Almost_satisfied t) ts
+        | `Almost_satisfied t, `Satisfied -> aux (`Almost_satisfied t) ts
+        | `Almost_satisfied _, `Undetermined -> aux `Undetermined ts
+        | `Contradicted, _ -> `Contradicted
+        | _, `Contradicted -> `Contradicted
+        | `Undetermined, _ -> aux `Undetermined ts)
+  in
+  aux `Satisfied incomp.terms
 
 let normalise_terms terms =
   let tbl = Hashtbl.create (List.length terms) in
@@ -203,20 +203,22 @@ let rec conflict_resolution state original_incomp incomp :
     | [] -> []
     | assignment :: assignments -> (
         match find_earliest_satisfier incomp assignments with
-        | [] ->
-            if incompatibility_satisfied (assignment :: assignments) incomp then
-              assignment :: assignments
-            else []
+        | [] -> (
+            match incompatibility_status (assignment :: assignments) incomp with
+            | `Satisfied -> assignment :: assignments
+            | _ -> [])
         | solution -> solution)
   in
   let rec find_previous_satisfier satisfier incomp = function
     | [] -> []
     | assignment :: assignments -> (
         match find_previous_satisfier satisfier incomp assignments with
-        | [] ->
-            if incompatibility_satisfied (satisfier :: assignment :: assignments) incomp
-            then assignment :: assignments
-            else []
+        | [] -> (
+            match
+              incompatibility_status (satisfier :: assignment :: assignments) incomp
+            with
+            | `Satisfied -> assignment :: assignments
+            | _ -> [])
         | solution -> solution)
   in
   match incomp.terms with
@@ -291,32 +293,31 @@ let rec unit_propagation state changed : (state, incompatibility) Result.t =
 and incompat_propagation state changed = function
   | [] -> unit_propagation state changed
   | incomp :: incomps -> (
-      if incompatibility_satisfied state.solution incomp then
-        match conflict_resolution state incomp incomp with
-        | Ok (state, incomp, term) ->
-            let assignment = Derivation (negate_term term, incomp) in
-            let _, name, _ = term in
-            debug_printf "new assignment on level %d: %a\n" state.decision_level
-              pp_assignment assignment;
-            let state =
-              {
-                state with
-                solution = (assignment, state.decision_level) :: state.solution;
-              }
-            in
-            unit_propagation state [ name ]
-        | Error incomp -> Error incomp
-      else
-        match get_almost_satisfied_term state.solution incomp with
-        | Some term ->
-            let assignment = Derivation (negate_term term, incomp) in
-            debug_printf "new assignment on level %d: %a\n" state.decision_level
-              pp_assignment assignment;
-            let solution = (assignment, state.decision_level) :: state.solution in
-            let state = { state with solution } in
-            let _, name, _ = term in
-            incompat_propagation state (name :: changed) incomps
-        | None -> incompat_propagation state changed incomps)
+      match incompatibility_status state.solution incomp with
+      | `Satisfied -> (
+          match conflict_resolution state incomp incomp with
+          | Ok (state, incomp, term) ->
+              let assignment = Derivation (negate_term term, incomp) in
+              let _, name, _ = term in
+              debug_printf "new assignment on level %d: %a\n" state.decision_level
+                pp_assignment assignment;
+              let state =
+                {
+                  state with
+                  solution = (assignment, state.decision_level) :: state.solution;
+                }
+              in
+              unit_propagation state [ name ]
+          | Error incomp -> Error incomp)
+      | `Almost_satisfied term ->
+          let assignment = Derivation (negate_term term, incomp) in
+          debug_printf "new assignment on level %d: %a\n" state.decision_level
+            pp_assignment assignment;
+          let solution = (assignment, state.decision_level) :: state.solution in
+          let state = { state with solution } in
+          let _, name, _ = term in
+          incompat_propagation state (name :: changed) incomps
+      | _ -> incompat_propagation state changed incomps)
 
 let dependency_incomps dependencies (name, version) =
   List.map
@@ -387,7 +388,14 @@ let make_decision available_versions dependencies state =
             let state = { state with incomps } in
             let assignment = Decision (name, version) in
             let solution = (assignment, decision_level) :: state.solution in
-            match List.find_opt (incompatibility_satisfied solution) incomps with
+            match
+              List.find_opt
+                (fun i ->
+                  match incompatibility_status solution i with
+                  | `Satisfied -> true
+                  | _ -> false)
+                incomps
+            with
             | Some incomp ->
                 debug_printf "not adding due to incompatibility %a\n" pp_incompatibility
                   incomp;
@@ -440,16 +448,17 @@ let solve (available_versions : available_versions) (dependencies : dependencies
 
 let explain_terms fmt = function
   | [ (Pos, n, vs); (Neg, m, us) ] | [ (Neg, m, us); (Pos, n, vs) ] ->
-      Format.fprintf fmt "%a %a requires %a %a" pp_name n pp_versions vs pp_name m pp_versions
-        us
-  | [] | [ (Pos, RootName, [ RootVersion ]) ] -> Format.fprintf fmt "version solving failed."
+      Format.fprintf fmt "%a %a requires %a %a" pp_name n pp_versions vs pp_name m
+        pp_versions us
+  | [] | [ (Pos, RootName, [ RootVersion ]) ] ->
+      Format.fprintf fmt "version solving failed."
   | terms ->
-  Format.fprintf fmt "%a is forbidden."
-    Format.(
-      pp_print_list
-        ~pp_sep:(fun fmt () -> Format.pp_print_string fmt " or ")
-        (fun fmt t -> fprintf fmt "%a" pp_term t))
-    terms
+      Format.fprintf fmt "%a is forbidden."
+        Format.(
+          pp_print_list
+            ~pp_sep:(fun fmt () -> Format.pp_print_string fmt " or ")
+            (fun fmt t -> fprintf fmt "%a" pp_term t))
+        terms
 
 let explain_incompatibility fmt root =
   let line_numbers = Hashtbl.create 16 in
@@ -471,7 +480,8 @@ let explain_incompatibility fmt root =
     match incomp.cause with
     | RootCause -> Format.fprintf fmt "root"
     | NoVersions -> Format.fprintf fmt "%a not available" explain_terms incomp.terms
-    | Dependency (p, (n, vs)) -> Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
+    | Dependency (p, (n, vs)) ->
+        Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
     | Derived (cause1, cause2) ->
         (match (is_external cause1, is_external cause2) with
         (* Case 1 *)
