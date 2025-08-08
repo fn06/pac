@@ -1,8 +1,8 @@
-foo 1.1.0 ( left ( 1.0.0 ) right ( 1.0.0 ) )
-foo 1.0.0 ( )
-left 1.0.0 ( shared ( 1.0.0 2.0.0 ) )
-right 1.0.0 ( shared ( 1.0.0 ) )
-shared 2.0.0 ( )
-shared 1.0.0 ( target ( 1.0.0 ) )
-target 2.0.0 ( )
-target 1.0.0 ( )
+foo 1.1.0 -> left ( 1.0.0 ), -> right ( 1.0.0 );
+foo 1.0.0;
+left 1.0.0 -> shared ( 1.0.0 2.0.0 );
+right 1.0.0 -> shared ( 1.0.0 );
+shared 2.0.0;
+shared 1.0.0 -> target ( 1.0.0 );
+target 2.0.0;
+target 1.0.0;

@@ -4,7 +4,7 @@ open Cmdliner
 let process_file filename =
   let ic = match filename with Some f -> open_in f | None -> In_channel.stdin in
   try
-    let v = Parser.expression Lexer.read (Lexing.from_channel ic) in
+    let v = Parser.instance Lexer.read (Lexing.from_channel ic) in
     if ic <> In_channel.stdin then close_in ic;
     v
   with e ->

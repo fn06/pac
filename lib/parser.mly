@@ -1,33 +1,42 @@
 %token <string> WORD 
 %token LPAREN RPAREN
+%token ARROW
+%token SEMICOLON
+%token COMMA
 %token EOF
 
-%start <Ast.expression> expression
+%start <Ast.expression> instance
 %start <Ast.package> package
 %start <Ast.query> query
 %%
 
-expression:
-  | e = dependencies; EOF { e }
-
 query:
   | q = targets; EOF { q }
 
-/* TODO syntax for extensions */
-
-dependencies:
-  | { [  ] }
-  | d = dependency; ds = dependencies { d :: ds }
-
-dependency:
-  | p = package; LPAREN; ts = targets; RPAREN { (p, ts) }
-
-target:
-  | n = WORD; LPAREN; vs = versions; RPAREN   { (n, vs) }
-
 targets:
   | { [] }
-  | t = target; ts = targets   { t :: ts }
+  | t = target; ts = targets { t :: ts }
+
+instance:
+  | i = entries; EOF { i }
+
+entries:
+  | { [ ] }
+  | d = entry; SEMICOLON; ds = entries { d :: ds }
+
+entry:
+  | p = package; rs = relations; { (p, rs) }
+
+relations:
+  | { [ ] }
+  | r = relation; { [ r ] }
+  | r = relation; COMMA; rs = relations { r :: rs }
+
+relation:
+  | ARROW; d = target { let (n, vs) = d in (n, vs) }
+
+target:
+  | n = WORD; LPAREN; vs = versions; RPAREN { (n, vs) }
 
 /* TODO version formula */
 
