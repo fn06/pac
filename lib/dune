@@ -5,4 +5,4 @@
 
 (library
  (name pac)
- (modules ast lexer parser util core concurrent pubgrub import))
+ (modules ast lexer parser core concurrent pubgrub import))

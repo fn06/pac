@@ -1,14 +1,8 @@
 open Import
 open Option.Syntax
 open Result.Syntax
+open Core
 
-type name = RootName | Name of string
-type version = RootVersion | Version of string
-type package = name * version
-type dependency = package * (name * version list)
-type dependencies = (package, name * version list) Hashtbl.t
-type available_versions = (name, version) Hashtbl.t
-type resolution = package list
 type polarity = Pos | Neg
 
 (* TODO version formula *)
@@ -31,35 +25,6 @@ type state = {
   solution : solution;
   decision_level : decision_level;
 }
-
-let pp_name fmt = function
-  | RootName -> Format.pp_print_string fmt "Root"
-  | Name n -> Format.pp_print_string fmt n
-
-let pp_version fmt = function
-  | RootVersion -> Format.pp_print_string fmt "Root"
-  | Version n -> Format.pp_print_string fmt n
-
-let pp_versions fmt vs =
-  Format.fprintf fmt "(%a)"
-    Format.(
-      pp_print_list
-        ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
-        (fun fmt v -> fprintf fmt "%a" pp_version v))
-    vs
-
-let pp_package fmt = function
-  | RootName, RootVersion -> Format.fprintf fmt "root"
-  | n, v -> Format.fprintf fmt "%a %a" pp_name n pp_version v
-
-let pp_dependency fmt (p, (n, vs)) =
-  Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
-
-let pp_resolution =
-  Format.(
-    pp_print_list
-      ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
-      (fun fmt (n, v) -> fprintf fmt "%a %a" pp_name n pp_version v))
 
 let pp_polarity fmt = function
   | Pos -> Format.fprintf fmt "%s" ""
@@ -126,12 +91,6 @@ let term_name = function Pos, name, _ | Neg, name, _ -> name
 let negate_term = function
   | Pos, name, versions -> (Neg, name, versions)
   | Neg, name, versions -> (Pos, name, versions)
-
-module NameMap = Map.Make (struct
-  type t = name
-
-  let compare = compare
-end)
 
 let term_status solution term =
   let rec solution_versions name = function
@@ -319,7 +278,7 @@ and incompat_propagation state changed = function
           incompat_propagation state (name :: changed) incomps
       | _ -> incompat_propagation state changed incomps)
 
-let dependency_incomps dependencies (name, version) =
+let dependency_incomps dependency_map (name, version) =
   List.map
     (fun (dep_name, dep_versions) ->
       {
@@ -332,9 +291,9 @@ let dependency_incomps dependencies (name, version) =
           ];
         cause = Dependency ((name, version), (dep_name, dep_versions));
       })
-    (Hashtbl.find_all dependencies (name, version))
+    (Hashtbl.find_all dependency_map (name, version))
 
-let make_decision available_versions dependencies state =
+let make_decision version_map dependency_map state =
   (* Find a name that has positive derivations but no decision and collect it's versions *)
   (* NOTE could index over this *)
   let rec find_versions name = function
@@ -367,7 +326,7 @@ let make_decision available_versions dependencies state =
   debug_printf "deciding on %a: %a\n" pp_name name pp_versions vs;
   let decision_level = state.decision_level + 1 in
   (* Filter to only versions that are actually available *)
-  let real_vs = intersect (Hashtbl.find_all available_versions name) vs in
+  let real_vs = intersect (Hashtbl.find_all version_map name) vs in
   match real_vs with
   | [] ->
       let incomp = { terms = [ (Pos, name, vs) ]; cause = NoVersions } in
@@ -380,7 +339,7 @@ let make_decision available_versions dependencies state =
         | [] -> Some (name, state)
         | version :: versions -> (
             debug_printf "trying version %a\n" pp_version version;
-            let dep_incomps = dependency_incomps dependencies (name, version) in
+            let dep_incomps = dependency_incomps dependency_map (name, version) in
             if List.length dep_incomps > 0 then
               debug_printf "dependency incompatibilities\n\t%a\n" pp_incompatibilities
                 dep_incomps;
@@ -416,7 +375,7 @@ let extract_resolution state =
           match assignment with Decision pkg -> Some pkg | _ -> None))
     state.solution
 
-let init_incomps dependencies =
+let init_incomps dependency_map =
   { terms = [ (Neg, RootName, [ RootVersion ]) ]; cause = RootCause }
   :: List.map
        (fun ((name, versions) as dep) ->
@@ -430,19 +389,27 @@ let init_incomps dependencies =
              ];
            cause = Dependency ((RootName, RootVersion), dep);
          })
-       (Hashtbl.find_all dependencies (RootName, RootVersion))
+       (Hashtbl.find_all dependency_map (RootName, RootVersion))
 
-let solve (available_versions : available_versions) (dependencies : dependencies) :
-    (package list, incompatibility) Result.t =
+let resolve (repository : Core.repository) (dependencies : Core.dependencies) :
+    (Core.package list, incompatibility) Result.t =
+  let version_map = Hashtbl.create 0 in
+  List.iter (fun (name, version) -> Hashtbl.add version_map name version) repository;
+  let dependency_map = Hashtbl.create 0 in
+  List.iter
+    (function
+      | depender, (dependency_name, dependency_versions) ->
+          Hashtbl.add dependency_map depender (dependency_name, dependency_versions))
+    dependencies;
   let rec solve_loop state next =
     match unit_propagation state [ next ] with
     | Error incomp -> Error incomp
     | Ok state -> (
-        match make_decision available_versions dependencies state with
+        match make_decision version_map dependency_map state with
         | None -> Ok (extract_resolution state)
         | Some (next, state) -> solve_loop state next)
   in
-  let incomps = init_incomps dependencies in
+  let incomps = init_incomps dependency_map in
   debug_printf "initial incompatibilities\n\t%a\n" pp_incompatibilities incomps;
   solve_loop { incomps; solution = []; decision_level = 0 } RootName
 

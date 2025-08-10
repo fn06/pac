@@ -1,21 +1,24 @@
-open Util
 open Core
 
 type granularity = version -> version
 
-let encode_name (n : name) (g : version) : name = n ^ "-" ^ g
+let encode_name (n : name) (g : version) : name =
+  Name (Format.asprintf "<%a,%a>" pp_name n pp_version g)
 
 let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies =
   let granular =
-    List.fold_left (fun set v -> StringSet.add (g v) set) StringSet.empty vs
+    List.fold_left (fun set v -> VersionSet.add (g v) set) VersionSet.empty vs
   in
-  (* Direct case *)
-  if StringSet.cardinal granular <= 1 then
-    let w = StringSet.choose granular in
-    [ ((encode_name n (g v), v), (encode_name m w, vs)) ] (* Split case *)
+  if VersionSet.cardinal granular <= 1 then
+    (* Direct case *)
+    let w = VersionSet.choose granular in
+    [ ((encode_name n (g v), v), (encode_name m w, vs)) ]
   else
-    let intermediate = Printf.sprintf "i-%s-%s-%s" n v m in
-    let gvs = StringSet.to_list granular in
+    (* Split case *)
+    let intermediate =
+      Name (Format.asprintf "<%a,%a,%a>" pp_name n pp_version v pp_name m)
+    in
+    let gvs = VersionSet.to_list granular in
     let dependant = [ ((encode_name n (g v), v), (intermediate, gvs)) ] in
     let intermediates =
       List.concat_map
@@ -26,12 +29,14 @@ let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies
     in
     dependant @ intermediates
 
-let encode_dependencies (g : granularity) (dependencies : dependencies) : dependencies =
-  dependencies |> List.concat_map (encode_dep g)
+let encode (g : granularity) (core : instance) : instance =
+  let repo, deps = core in
+  let reduced_repo = List.map (fun (n, v) -> (encode_name n (g v), v)) repo in
+  let reduced_deps = deps |> List.concat_map (encode_dep g) in
+  (reduced_repo, reduced_deps)
 
 module Resolution = struct
-  let check_root_inclusion ~(root : package) ~(resolution : package list) =
-    List.mem root resolution
+  let check_root_inclusion = Core.Resolution.check_root_inclusion
 
   let check_dependency_closure (dependencies : dependencies) (resolution : package list) =
     List.for_all
@@ -39,35 +44,36 @@ module Resolution = struct
         match List.mem p resolution with
         | false -> true
         | true -> (
-            match
-              List.find_opt (fun (o, v) -> String.equal o m && List.mem v vs) resolution
-            with
+            match List.find_opt (fun (o, v) -> o = m && List.mem v vs) resolution with
             | Some _ -> true
             | None -> false))
       dependencies
 
   let check_version_granularity (g : granularity) (resolution : package list) =
-    let name_map =
-      List.fold_left
-        (fun map (name, version) ->
-          let versions = try StringMap.find name map with Not_found -> [] in
-          StringMap.add name (version :: versions) map)
-        StringMap.empty resolution
-    in
-    StringMap.for_all
-      (fun _ versions ->
+    let name_map = Hashtbl.create 0 in
+    List.iter
+      (fun (name, version) ->
+        let versions = try Hashtbl.find name_map name with Not_found -> [] in
+        Hashtbl.add name_map name (version :: versions))
+      resolution;
+    Hashtbl.fold
+      (fun _ versions acc ->
+        acc
+        &&
         let len = List.length versions in
         if len <= 1 then true
         else
           let granular_set =
-            List.fold_left (fun set v -> StringSet.add (g v) set) StringSet.empty versions
+            List.fold_left
+              (fun set v -> VersionSet.add (g v) set)
+              VersionSet.empty versions
           in
-          StringSet.cardinal granular_set = len)
-      name_map
+          VersionSet.cardinal granular_set = len)
+      name_map true
 
   let check_concurrent_resolution (g : granularity) (dependencies : dependencies)
-      ~(root : package) ~(resolution : package list) =
-    check_root_inclusion ~root ~resolution
+      (resolution : package list) =
+    check_root_inclusion resolution
     && check_dependency_closure dependencies resolution
     && check_version_granularity g resolution
 end

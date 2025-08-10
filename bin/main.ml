@@ -1,57 +1,88 @@
 open Pac
 open Cmdliner
 
-let process_file filename =
+let parse_instance filename =
   let ic = match filename with Some f -> open_in f | None -> In_channel.stdin in
-  try
-    let v = Parser.instance Lexer.read (Lexing.from_channel ic) in
-    if ic <> In_channel.stdin then close_in ic;
-    v
-  with e ->
-    if ic <> In_channel.stdin then close_in ic;
-    raise e
+  let lexbuf = Lexing.from_channel ic in
+  let v =
+    try Parser.instance Lexer.read lexbuf
+    with e ->
+      if ic <> In_channel.stdin then close_in ic;
+      let curr = lexbuf.Lexing.lex_curr_p in
+      let line = curr.Lexing.pos_lnum in
+      let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+      let tok = Lexing.lexeme lexbuf in
+      Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
+      raise e
+  in
+  if ic <> In_channel.stdin then close_in ic;
+  v
 
-let parse_package str = Parser.package Lexer.read (Lexing.from_string str)
-let parse_query str = Parser.query Lexer.read (Lexing.from_string str)
+let parse_query str =
+  let lexbuf = (Lexing.from_string str) in
+  try Parser.query Lexer.read lexbuf with e ->
+      let curr = lexbuf.Lexing.lex_curr_p in
+      let line = curr.Lexing.pos_lnum in
+      let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+      let tok = Lexing.lexeme lexbuf in
+      Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
+      raise e
+
+
+let parse_packages str =
+  let lexbuf = (Lexing.from_string str) in
+  try Parser.packages Lexer.read lexbuf with e ->
+      let curr = lexbuf.Lexing.lex_curr_p in
+      let line = curr.Lexing.pos_lnum in
+      let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+      let tok = Lexing.lexeme lexbuf in
+      Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
+      raise e
 
 let parse_cmd filename =
-  let deps = process_file filename in
-  Ast.pp Format.std_formatter deps
+  let instance = parse_instance filename in
+  Ast.pp Format.std_formatter instance
 
-let major_version v = List.hd (String.split_on_char '.' v)
+let major_version = function
+  | Core.Version v -> Core.Version (List.hd (String.split_on_char '.' v))
+  | v -> v
 
-let check_cmd filename query_str resolution_str granularity calculus () =
-  let ast = process_file filename in
-  let deps =
-    List.flatten
-    @@ List.map (fun (pkg, targets) -> List.map (fun t -> (pkg, t)) targets) ast
-  in
-  let g =
-    match granularity with
-    | "major" -> major_version
-    | custom -> failwith (Printf.sprintf "Unknown granularity: %s" custom)
-  in
-  let root = ("root", "root") in
+let check_cmd filename query_str resolution_str calculus () =
+  let instance = parse_instance filename in
+  let _repo, deps = Core.of_ast instance in
+  let g = major_version in
   let query = parse_query query_str in
-  let deps = List.map (fun dep -> (root, dep)) query @ deps in
-  let resolution = List.map parse_package (String.split_on_char ',' resolution_str) in
+  let deps =
+    List.map
+      (fun (n, vs) ->
+        ( (Core.RootName, Core.RootVersion),
+          (Core.Name n, List.map (fun v -> Core.Version v) vs) ))
+      query
+    @ deps
+  in
+  let resolution =
+    (Core.RootName, Core.RootVersion)
+    :: List.map
+         (fun (n, v) -> (Core.Name n, Core.Version v))
+         (parse_packages resolution_str)
+  in
   match calculus with
   | "core" ->
       let open Core.Resolution in
-      let root_inclusion = check_root_inclusion ~root ~resolution in
+      let root_inclusion = check_root_inclusion resolution in
       let dep_closure = check_dependency_closure deps resolution in
       let version_uniqueness = check_version_uniqueness resolution in
-      let valid_resolution = check_resolution deps ~root ~resolution in
+      let valid_resolution = check_resolution deps resolution in
       Printf.printf "Core resolution: %b\n" valid_resolution;
       Printf.printf "\tRoot inclusion: %b\n" root_inclusion;
       Printf.printf "\tDependency closure: %b\n" dep_closure;
       Printf.printf "\tVersion uniqueness: %b\n" version_uniqueness
   | "concurrent" ->
       let open Concurrent.Resolution in
-      let root_inclusion = check_root_inclusion ~root ~resolution in
+      let root_inclusion = check_root_inclusion resolution in
       let dep_closure = check_dependency_closure deps resolution in
       let version_granularity = check_version_granularity g resolution in
-      let concurrent_resolution = check_concurrent_resolution g deps ~root ~resolution in
+      let concurrent_resolution = check_concurrent_resolution g deps resolution in
       Printf.printf "Concurrent resolution: %b\n" concurrent_resolution;
       Printf.printf "\tRoot inclusion: %b\n" root_inclusion;
       Printf.printf "\tDependency closure: %b\n" dep_closure;
@@ -62,11 +93,8 @@ let check_cmd filename query_str resolution_str granularity calculus () =
            "Unknown calculus: %s (expected 'core', 'concurrent', or 'pubgrub')" calculus)
 
 let reduce_cmd filename granularity from_calculus to_calculus () =
-  let ast = process_file filename in
-  let deps =
-    List.flatten
-    @@ List.map (fun (pkg, targets) -> List.map (fun t -> (pkg, t)) targets) ast
-  in
+  let instance = parse_instance filename in
+  let core = Core.of_ast instance in
   let g =
     match granularity with
     | "major" -> major_version
@@ -74,42 +102,28 @@ let reduce_cmd filename granularity from_calculus to_calculus () =
   in
   match (from_calculus, to_calculus) with
   | "concurrent", "core" ->
-      let reduced = Concurrent.encode_dependencies g deps in
-      let ast_reduced =
-        List.map (fun (pkg, (name, versions)) -> (pkg, [ (name, versions) ])) reduced
-      in
+      let reduced = Concurrent.encode g core in
+      let ast_reduced = Core.to_ast reduced in
       Ast.pp Format.std_formatter ast_reduced
-  | "core", "concurrent" -> Ast.pp Format.std_formatter ast
-  | src, dst when src = dst -> Ast.pp Format.std_formatter ast
+  | "core", "concurrent" -> Ast.pp Format.std_formatter instance
+  | src, dst when src = dst -> Ast.pp Format.std_formatter instance
   | src, dst -> failwith (Printf.sprintf "Unsupported reduction: %s to %s" src dst)
 
 let solve_cmd filename query_str debug () =
-  let ast = process_file filename in
+  let instance = parse_instance filename in
   let query = parse_query query_str in
-  let deps = Hashtbl.create (List.length ast) in
-  let open Pubgrub in
-  List.iter
-    (fun ((depender_name, depender_version), targets) ->
-      List.iter
-        (fun (dependency_name, dependency_versions) ->
-          Hashtbl.add deps
-            (Name depender_name, Version depender_version)
-            (Name dependency_name, List.map (fun v -> Version v) dependency_versions))
-        targets)
-    ast;
-  List.iter
-    (fun (dependency_name, dependency_versions) ->
-      Hashtbl.add deps (RootName, RootVersion)
-        (Name dependency_name, List.map (fun v -> Version v) dependency_versions))
-    query;
-  let available_version = Hashtbl.create (List.length ast) in
-  List.iter
-    (fun ((name, version), _) ->
-      Hashtbl.add available_version (Name name) (Version version))
-    ast;
+  let repo, deps = Core.of_ast instance in
+  let deps =
+    List.map
+      (fun (n, vs) ->
+        ( (Core.RootName, Core.RootVersion),
+          (Core.Name n, List.map (fun v -> Core.Version v) vs) ))
+      query
+    @ deps
+  in
   Pubgrub.set_debug debug;
-  match Pubgrub.solve available_version deps with
-  | Ok resolution -> Format.printf "%a\n%!" pp_resolution resolution
+  match Pubgrub.resolve repo deps with
+  | Ok resolution -> Format.printf "%a\n%!" Core.pp_packages resolution
   | Error incomp -> Format.printf "%a\n%!" Pubgrub.explain_incompatibility incomp
 
 let file_arg =
@@ -177,9 +191,7 @@ let reduce_info =
       ]
 
 let check_term =
-  Term.(
-    const check_cmd $ file_arg $ query_arg $ resolution_arg $ granularity_arg
-    $ calculus_arg $ const ())
+  Term.(const check_cmd $ file_arg $ query_arg $ resolution_arg $ calculus_arg $ const ())
 
 let check_info =
   Cmd.info "check" ~doc:"Check if a resolution is valid"

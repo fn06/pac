@@ -1,24 +1,29 @@
-%token <string> WORD 
+%token <string> WORD
 %token LPAREN RPAREN
 %token ARROW
 %token SEMICOLON
 %token COMMA
 %token EOF
 
-%start <Ast.expression> instance
-%start <Ast.package> package
+%start <Ast.instance> instance
 %start <Ast.query> query
+%start <Ast.packages> packages
 %%
+
+instance:
+  | i = entries; EOF { i }
 
 query:
   | q = targets; EOF { q }
 
+packages:
+  | EOF; { [ ] }
+  | p = package; EOF; { [ p ] }
+  | p = package; COMMA; ps = packages; { p :: ps }
+
 targets:
   | { [] }
   | t = target; ts = targets { t :: ts }
-
-instance:
-  | i = entries; EOF { i }
 
 entries:
   | { [ ] }
@@ -45,5 +50,4 @@ versions:
   | v = WORD; vs = versions { v :: vs }
 
 package:
-  | name = WORD; version = WORD { (name, version) } 
-
+  | name = WORD; version = WORD { (name, version) }
