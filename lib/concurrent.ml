@@ -2,10 +2,9 @@ open Core
 
 type granularity = version -> version
 
-let encode_name (n : name) (g : version) : name =
-  Name (Format.asprintf "<%a-%a>" pp_name n pp_version g)
+let encode_name n g = Name (Format.asprintf "<%a-%a>" pp_name n pp_version g)
 
-let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies =
+let encode_dep g ((n, v), (m, vs)) =
   let granular =
     List.fold_left (fun set v -> VersionSet.add (g v) set) VersionSet.empty vs
   in
@@ -29,7 +28,7 @@ let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies
     in
     dependant @ intermediates
 
-let encode (g : granularity) (core : instance) : instance =
+let encode g core =
   let repo, deps = core in
   let reduced_repo =
     List.map (fun (n, v) -> (encode_name n (g v), v)) repo
@@ -53,7 +52,7 @@ let encode (g : granularity) (core : instance) : instance =
 module Resolution = struct
   let check_root_inclusion = Core.Resolution.check_root_inclusion
 
-  let check_dependency_closure (dependencies : dependencies) (resolution : package list) =
+  let check_dependency_closure dependencies resolution =
     List.for_all
       (fun (p, (m, vs)) ->
         match List.mem p resolution with
@@ -64,7 +63,7 @@ module Resolution = struct
             | None -> false))
       dependencies
 
-  let check_version_granularity (g : granularity) (resolution : package list) =
+  let check_version_granularity g resolution =
     let name_map = Hashtbl.create 0 in
     List.iter
       (fun (name, version) ->
@@ -86,8 +85,7 @@ module Resolution = struct
           VersionSet.cardinal granular_set = len)
       name_map true
 
-  let check_concurrent_resolution (g : granularity) (dependencies : dependencies)
-      (resolution : package list) =
+  let check_concurrent_resolution g dependencies resolution =
     check_root_inclusion resolution
     && check_dependency_closure dependencies resolution
     && check_version_granularity g resolution
