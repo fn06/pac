@@ -3,7 +3,7 @@ open Core
 type granularity = version -> version
 
 let encode_name (n : name) (g : version) : name =
-  Name (Format.asprintf "<%a,%a>" pp_name n pp_version g)
+  Name (Format.asprintf "<%a-%a>" pp_name n pp_version g)
 
 let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies =
   let granular =
@@ -16,7 +16,7 @@ let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies
   else
     (* Split case *)
     let intermediate =
-      Name (Format.asprintf "<%a,%a,%a>" pp_name n pp_version v pp_name m)
+      Name (Format.asprintf "<%a-%a-%a>" pp_name n pp_version v pp_name m)
     in
     let gvs = VersionSet.to_list granular in
     let dependant = [ ((encode_name n (g v), v), (intermediate, gvs)) ] in
@@ -31,7 +31,22 @@ let encode_dep (g : granularity) (((n, v), (m, vs)) : dependency) : dependencies
 
 let encode (g : granularity) (core : instance) : instance =
   let repo, deps = core in
-  let reduced_repo = List.map (fun (n, v) -> (encode_name n (g v), v)) repo in
+  let reduced_repo =
+    List.map (fun (n, v) -> (encode_name n (g v), v)) repo
+    @ List.fold_left
+        (fun acc ((n, v), (m, vs)) ->
+          let granular =
+            List.fold_left (fun set v -> VersionSet.add (g v) set) VersionSet.empty vs
+          in
+          if VersionSet.cardinal granular <= 1 then acc
+          else
+            let intermediate =
+              Name (Format.asprintf "<%a-%a-%a>" pp_name n pp_version v pp_name m)
+            in
+            let gvs = VersionSet.to_list granular in
+            List.map (fun v -> (intermediate, v)) gvs @ acc)
+        [] deps
+  in
   let reduced_deps = deps |> List.concat_map (encode_dep g) in
   (reduced_repo, reduced_deps)
 

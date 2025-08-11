@@ -19,25 +19,26 @@ let parse_instance filename =
   v
 
 let parse_query str =
-  let lexbuf = (Lexing.from_string str) in
-  try Parser.query Lexer.read lexbuf with e ->
-      let curr = lexbuf.Lexing.lex_curr_p in
-      let line = curr.Lexing.pos_lnum in
-      let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
-      let tok = Lexing.lexeme lexbuf in
-      Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
-      raise e
-
+  let lexbuf = Lexing.from_string str in
+  try Parser.query Lexer.read lexbuf
+  with e ->
+    let curr = lexbuf.Lexing.lex_curr_p in
+    let line = curr.Lexing.pos_lnum in
+    let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+    let tok = Lexing.lexeme lexbuf in
+    Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
+    raise e
 
 let parse_packages str =
-  let lexbuf = (Lexing.from_string str) in
-  try Parser.packages Lexer.read lexbuf with e ->
-      let curr = lexbuf.Lexing.lex_curr_p in
-      let line = curr.Lexing.pos_lnum in
-      let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
-      let tok = Lexing.lexeme lexbuf in
-      Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
-      raise e
+  let lexbuf = Lexing.from_string str in
+  try Parser.packages Lexer.read lexbuf
+  with e ->
+    let curr = lexbuf.Lexing.lex_curr_p in
+    let line = curr.Lexing.pos_lnum in
+    let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
+    let tok = Lexing.lexeme lexbuf in
+    Printf.eprintf "Parse error at line %d column %d token '%s'\n" line col tok;
+    raise e
 
 let parse_cmd filename =
   let instance = parse_instance filename in

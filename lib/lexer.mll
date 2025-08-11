@@ -4,7 +4,7 @@ open Parser
 exception SyntaxError of string
 }
 
-let word = ['a'-'z' 'A'-'Z' '0'-'9' '_' '.']+
+let word = ['a'-'z' 'A'-'Z' '0'-'9' '_' '.' '>' '<' '-' ]+
 
 rule read =
   parse
