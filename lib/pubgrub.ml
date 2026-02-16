@@ -454,7 +454,7 @@ let explain_incompatibility fmt root =
         (* Case 1 *)
         | false, false -> (
             match
-              (Hashtbl.find_opt line_numbers cause1, Hashtbl.find_opt line_numbers cause1)
+              (Hashtbl.find_opt line_numbers cause1, Hashtbl.find_opt line_numbers cause2)
             with
             | Some line1, Some line2 ->
                 (* Case 1.i *)
