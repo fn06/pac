@@ -290,9 +290,9 @@ Conflict Resolution: "If satisfier doesn't satisfy term, add not (satisfier \
 term) to priorCause"). This causes the over-strong incompatibility
 '{not b (2), not c (2)}' to be learned, which cascades into a false conclusion
 that no solution exists.
-  $ pac solve -f partial-satisfier-bug.pac -q 'a ( 1 2 ) b ( 1 ) c ( 1 )'
+  $ pac solve -f partial-satisfier.pac -q 'a ( 1 2 ) b ( 1 ) c ( 1 )'
   a 1, c 1, b 1
 Dependency collapsing: when multiple versions share a dependency, the collapsed
 incompatibility should be emitted and deduplicated.
-  $ pac solve -f collapse-dedup-bug.pac -q 'a ( 1 2 )'
+  $ pac solve -f shared-dependency.pac -q 'a ( 1 2 )'
   b 1, a 2
