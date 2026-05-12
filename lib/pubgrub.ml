@@ -213,7 +213,7 @@ module Make (N : NAME) (V : VERSION) = struct
     let tbl = Hashtbl.create (List.length terms) in
     List.iter
       (function
-        | Neg, Root, _ -> ()
+        | Pos, Root, _ when List.length terms > 1 -> ()
         | pol, name, r -> (
             let key =
               List.find_opt
@@ -226,8 +226,10 @@ module Make (N : NAME) (V : VERSION) = struct
             | None -> replace (pol, r)
             | Some (pol', r') -> (
                 match (pol, pol') with
-                | Pos, Pos | Neg, Neg -> replace (pol, Ranges.intersection r r')
-                | Pos, Neg | Neg, Pos -> replace (Pos, if pol = Pos then r else r'))))
+                | Pos, Pos -> replace (Pos, Ranges.intersection r r')
+                | Neg, Neg -> replace (Neg, Ranges.union r r')
+                | Pos, Neg -> replace (Pos, Ranges.difference r r')
+                | Neg, Pos -> replace (Pos, Ranges.difference r' r))))
       terms;
     Hashtbl.fold (fun name (pol, r) acc -> (pol, name, r) :: acc) tbl []
 
