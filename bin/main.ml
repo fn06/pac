@@ -123,25 +123,25 @@ let solve_cmd filename query_str debug () =
   let instance = parse_instance filename in
   let query = parse_query query_str in
   let repo, deps = Core.of_ast instance in
-  let repo =
-    List.filter_map
-      (function Core.Name n, Core.Version v -> Some (n, v) | _ -> None)
-      repo
-  in
-  let deps =
-    List.filter_map
-      (function
-        | (Core.Name n, Core.Version v), (Core.Name dn, dvs) ->
-            let vs =
-              List.filter_map (function Core.Version v -> Some v | _ -> None) dvs
-            in
-            Some ((n, v), (dn, Solver.Ranges.of_list vs))
-        | _ -> None)
-      deps
-  in
+  let repo_tbl = Hashtbl.create 16 in
+  List.iter
+    (function Core.Name n, Core.Version v -> Hashtbl.add repo_tbl n v | _ -> ())
+    repo;
+  let dep_tbl = Hashtbl.create 16 in
+  List.iter
+    (function
+      | (Core.Name n, Core.Version v), (Core.Name dn, dvs) ->
+          let vs =
+            List.filter_map (function Core.Version v -> Some v | _ -> None) dvs
+          in
+          Hashtbl.add dep_tbl (n, v) (dn, Solver.Ranges.of_list vs)
+      | _ -> ())
+    deps;
+  let versions n = Hashtbl.find_all repo_tbl n in
+  let dependencies n v = Hashtbl.find_all dep_tbl (n, v) in
   let query = List.map (fun (n, vs) -> (n, Solver.Ranges.of_list vs)) query in
   Pubgrub.set_debug debug;
-  match Solver.resolve repo deps query with
+  match Solver.resolve ~versions ~dependencies query with
   | Ok resolution ->
       Format.printf "%a\n%!"
         Format.(

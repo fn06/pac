@@ -31,5 +31,8 @@ build: [
     "@doc" {with-doc}
   ]
 ]
+pin-depends: [
+  ["pubgrub.dev" "git+https://github.com/RyanGibb/ocaml-pubgrub.git"]
+]
 dev-repo: "git+https://github.com/username/reponame.git"
 x-maintenance-intent: ["(latest)"]
