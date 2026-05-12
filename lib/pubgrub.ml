@@ -298,19 +298,25 @@ and incompat_propagation state changed = function
           incompat_propagation state (name :: changed) incomps
       | _ -> incompat_propagation state changed incomps)
 
-let dependency_incomps dependency_map (name, version) =
-  List.map
+let dependency_incomps dependency_map version_map (name, version) =
+  List.filter_map
     (fun (dep_name, dep_versions) ->
-      {
-        terms =
-          [
-            (* If this package is selected, *)
-            (Pos, name, [ version ]);
-            (* then we can't not have a compatible dependency *)
-            (Neg, dep_name, dep_versions);
-          ];
-        cause = Dependency ((name, version), (dep_name, dep_versions));
-      })
+      (* Collapse: find all versions of name with the same dependency *)
+      let depender_versions =
+        Hashtbl.find_all version_map name
+        |> List.filter (fun v ->
+               List.exists
+                 (fun (dn, dvs) -> dn = dep_name && dvs = dep_versions)
+                 (Hashtbl.find_all dependency_map (name, v)))
+      in
+      (* Only emit this incompatibility once: when version is the smallest *)
+      if List.for_all (fun v -> compare version v <= 0) depender_versions then
+        Some
+          {
+            terms = [ (Pos, name, depender_versions); (Neg, dep_name, dep_versions) ];
+            cause = Dependency ((name, version), (dep_name, dep_versions));
+          }
+      else None)
     (Hashtbl.find_all dependency_map (name, version))
 
 let make_decision version_map dependency_map state =
@@ -359,7 +365,9 @@ let make_decision version_map dependency_map state =
         | [] -> Some (name, state)
         | version :: versions -> (
             debug_printf "trying version %a\n" pp_version version;
-            let dep_incomps = dependency_incomps dependency_map (name, version) in
+            let dep_incomps =
+              dependency_incomps dependency_map version_map (name, version)
+            in
             if List.length dep_incomps > 0 then
               debug_printf "dependency incompatibilities\n\t%a\n" pp_incompatibilities
                 dep_incomps;
