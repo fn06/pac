@@ -283,13 +283,9 @@
   conflict resolution on: (terms: {Root (Root)}, cause: ((terms: {foo (1.0.0)}, cause: ((terms: {foo (1.0.0), not b (1.0.0)}, cause: dependency foo 1.0.0 -> b (1.0.0)) and (terms: {not b (2.0.0), foo (1.0.0)}, cause: ((terms: {a (1.0.0), not b (2.0.0)}, cause: dependency a 1.0.0 -> b (2.0.0)) and (terms: {foo (1.0.0), not a (1.0.0)}, cause: dependency foo 1.0.0 -> a (1.0.0)))))) and (terms: {Root (Root), not foo (1.0.0)}, cause: dependency root -> foo (1.0.0))))
   Because a 1.0.0 -> b (2.0.0) and foo 1.0.0 -> a (1.0.0), foo (1.0.0) requires b (2.0.0).
   And because foo 1.0.0 -> b (1.0.0) and root -> foo (1.0.0), version solving failed.
-Partial satisfier bug: the solver should find 'a 1, b 1, c 1' but incorrectly
-reports failure. During conflict resolution, the prior cause is missing the
-partial satisfier term 'z (2, 3)' per the PubGrub spec (see pubgrub-solver.md,
-Conflict Resolution: "If satisfier doesn't satisfy term, add not (satisfier \
-term) to priorCause"). This causes the over-strong incompatibility
-'{not b (2), not c (2)}' to be learned, which cascades into a false conclusion
-that no solution exists.
+Partial satisfier: two constraints on z from the same package (z (1 2 3) and
+z (2 3 4)) jointly pin z to (2, 3). Both z 2 and z 3 conflict, so the solver
+must backtrack to a 1.
   $ pac solve -f partial-satisfier.pac -q 'a ( 1 2 ) b ( 1 ) c ( 1 )'
   a 1, c 1, b 1
 Dependency collapsing: when multiple versions share a dependency, the collapsed
