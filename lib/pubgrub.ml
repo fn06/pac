@@ -113,7 +113,7 @@ module Make (N : NAME) (V : VERSION) = struct
         Format.fprintf fmt "Derivation %a due to incompatibility %a" pp_term term
           pp_incompatibility cause
 
-  let _pp_solution fmt =
+  let pp_solution fmt =
     Format.(
       pp_print_list
         ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
@@ -281,6 +281,7 @@ module Make (N : NAME) (V : VERSION) = struct
                   decision_level <= previous_satisfier_level)
                 state.solution
             in
+            debug_printf "solution: %a\n" pp_solution solution;
             let incomps =
               if incomp != original_incomp then (
                 debug_printf "new incompatibility %a\n" pp_incompatibility incomp;

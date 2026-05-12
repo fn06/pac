@@ -107,6 +107,7 @@
   conflict resolution on: (terms: {foo 2.0.0}, cause: ((terms: {bar 1.0.0, not foo 1.0.0}, cause: dependency bar 1.0.0 -> foo 1.0.0) and (terms: {foo 2.0.0, not bar 1.0.0}, cause: dependency foo 2.0.0 -> bar 1.0.0)))
   satisfiying assignment on level 1: Decision foo 2.0.0
   backtracking to level 0
+  solution: (0: Derivation foo 1.0.0 ∪ 2.0.0 due to incompatibility (terms: {Root *, not foo 1.0.0 ∪ 2.0.0}, cause: dependency root -> foo 1.0.0 ∪ 2.0.0)), (0: Decision root)
   new incompatibility (terms: {foo 2.0.0}, cause: ((terms: {bar 1.0.0, not foo 1.0.0}, cause: dependency bar 1.0.0 -> foo 1.0.0) and (terms: {foo 2.0.0, not bar 1.0.0}, cause: dependency foo 2.0.0 -> bar 1.0.0)))
   new assignment on level 0: Derivation not foo 2.0.0 due to incompatibility (terms: {foo 2.0.0}, cause: ((terms: {bar 1.0.0, not foo 1.0.0}, cause: dependency bar 1.0.0 -> foo 1.0.0) and (terms: {foo 2.0.0, not bar 1.0.0}, cause: dependency foo 2.0.0 -> bar 1.0.0)))
   unit propagation on: foo
@@ -165,6 +166,7 @@
   conflict resolution on: (terms: {shared 1.0.0, not target 1.0.0}, cause: dependency shared 1.0.0 -> target 1.0.0)
   satisfiying assignment on level 4: Derivation shared 1.0.0 due to incompatibility (terms: {right 1.0.0, not shared 1.0.0}, cause: dependency right 1.0.0 -> shared 1.0.0)
   backtracking to level 0
+  solution: (0: Derivation target 2.0.0 due to incompatibility (terms: {Root *, not target 2.0.0}, cause: dependency root -> target 2.0.0)), (0: Derivation foo 1.0.0 ∪ 1.1.0 due to incompatibility (terms: {Root *, not foo 1.0.0 ∪ 1.1.0}, cause: dependency root -> foo 1.0.0 ∪ 1.1.0)), (0: Decision root)
   new assignment on level 0: Derivation not shared 1.0.0 due to incompatibility (terms: {shared 1.0.0, not target 1.0.0}, cause: dependency shared 1.0.0 -> target 1.0.0)
   unit propagation on: shared
   deciding on target: 2.0.0
@@ -183,6 +185,7 @@
   conflict resolution on: (terms: {right 1.0.0, not shared 1.0.0}, cause: dependency right 1.0.0 -> shared 1.0.0)
   satisfiying assignment on level 2: Derivation right 1.0.0 due to incompatibility (terms: {foo 1.1.0, not right 1.0.0}, cause: dependency foo 1.1.0 -> right 1.0.0)
   backtracking to level 0
+  solution: (0: Derivation not shared 1.0.0 due to incompatibility (terms: {shared 1.0.0, not target 1.0.0}, cause: dependency shared 1.0.0 -> target 1.0.0)), (0: Derivation target 2.0.0 due to incompatibility (terms: {Root *, not target 2.0.0}, cause: dependency root -> target 2.0.0)), (0: Derivation foo 1.0.0 ∪ 1.1.0 due to incompatibility (terms: {Root *, not foo 1.0.0 ∪ 1.1.0}, cause: dependency root -> foo 1.0.0 ∪ 1.1.0)), (0: Decision root)
   new assignment on level 0: Derivation not right 1.0.0 due to incompatibility (terms: {right 1.0.0, not shared 1.0.0}, cause: dependency right 1.0.0 -> shared 1.0.0)
   unit propagation on: right
   new assignment on level 0: Derivation not foo 1.1.0 due to incompatibility (terms: {foo 1.1.0, not right 1.0.0}, cause: dependency foo 1.1.0 -> right 1.0.0)
@@ -227,6 +230,7 @@
   conflict resolution on: (terms: {bar 2.0.0, not baz 3.0.0}, cause: dependency bar 2.0.0 -> baz 3.0.0)
   satisfiying assignment on level 2: Derivation bar 2.0.0 due to incompatibility (terms: {foo 1.0.0, not bar 2.0.0}, cause: dependency foo 1.0.0 -> bar 2.0.0)
   backtracking to level 0
+  solution: (0: Derivation baz 1.0.0 due to incompatibility (terms: {Root *, not baz 1.0.0}, cause: dependency root -> baz 1.0.0)), (0: Derivation foo 1.0.0 due to incompatibility (terms: {Root *, not foo 1.0.0}, cause: dependency root -> foo 1.0.0)), (0: Decision root)
   new assignment on level 0: Derivation not bar 2.0.0 due to incompatibility (terms: {bar 2.0.0, not baz 3.0.0}, cause: dependency bar 2.0.0 -> baz 3.0.0)
   unit propagation on: bar
   conflict resolution on: (terms: {foo 1.0.0, not bar 2.0.0}, cause: dependency foo 1.0.0 -> bar 2.0.0)
@@ -271,6 +275,7 @@
   conflict resolution on: (terms: {not b 2.0.0, foo 1.0.0}, cause: ((terms: {a 1.0.0, not b 2.0.0}, cause: dependency a 1.0.0 -> b 2.0.0) and (terms: {foo 1.0.0, not a 1.0.0}, cause: dependency foo 1.0.0 -> a 1.0.0)))
   satisfiying assignment on level 1: Derivation b 1.0.0 due to incompatibility (terms: {foo 1.0.0, not b 1.0.0}, cause: dependency foo 1.0.0 -> b 1.0.0)
   backtracking to level 0
+  solution: (0: Derivation foo 1.0.0 due to incompatibility (terms: {Root *, not foo 1.0.0}, cause: dependency root -> foo 1.0.0)), (0: Decision root)
   new incompatibility (terms: {not b 2.0.0, foo 1.0.0}, cause: ((terms: {a 1.0.0, not b 2.0.0}, cause: dependency a 1.0.0 -> b 2.0.0) and (terms: {foo 1.0.0, not a 1.0.0}, cause: dependency foo 1.0.0 -> a 1.0.0)))
   new assignment on level 0: Derivation b 2.0.0 due to incompatibility (terms: {not b 2.0.0, foo 1.0.0}, cause: ((terms: {a 1.0.0, not b 2.0.0}, cause: dependency a 1.0.0 -> b 2.0.0) and (terms: {foo 1.0.0, not a 1.0.0}, cause: dependency foo 1.0.0 -> a 1.0.0)))
   unit propagation on: b
