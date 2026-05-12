@@ -120,6 +120,14 @@ module Make (N : NAME) (V : VERSION) = struct
         (fun fmt (a, d) -> fprintf fmt "(%d: %a)" d pp_assignment a))
       fmt
 
+  type term_status = Satisfied | Contradicted | Undetermined
+
+  type incomp_status =
+    | All_satisfied
+    | Some_contradicted
+    | Almost_satisfied of term
+    | Incomp_undetermined
+
   let term_name = function _, name, _ -> name
 
   let negate_term = function
@@ -170,36 +178,36 @@ module Make (N : NAME) (V : VERSION) = struct
     | Root -> (
         let selected = root_selected solution in
         match (selected, pol) with
-        | true, Pos -> `Satisfied
-        | true, Neg -> `Contradicted
-        | false, Pos -> `Undetermined
-        | false, Neg -> `Satisfied)
+        | true, Pos -> Satisfied
+        | true, Neg -> Contradicted
+        | false, Pos -> Undetermined
+        | false, Neg -> Satisfied)
     | Name _ -> (
         let has_positive, sr = solution_range name solution in
         match (has_positive, pol) with
-        | false, Pos -> `Contradicted
-        | false, Neg -> if Ranges.is_disjoint sr vs then `Satisfied else `Undetermined
+        | false, Pos -> Contradicted
+        | false, Neg -> if Ranges.is_disjoint sr vs then Satisfied else Undetermined
         | true, _ ->
             if Ranges.subset_of sr vs then
-              match pol with Pos -> `Satisfied | Neg -> `Contradicted
+              match pol with Pos -> Satisfied | Neg -> Contradicted
             else if Ranges.is_disjoint sr vs then
-              match pol with Pos -> `Contradicted | Neg -> `Satisfied
-            else `Undetermined)
+              match pol with Pos -> Contradicted | Neg -> Satisfied
+            else Undetermined)
 
-  let incompatibility_status solution incomp =
+  let incompatibility_status solution incomp : incomp_status =
     let rec aux s = function
       | [] -> s
       | t :: ts -> (
           match (s, term_status solution t) with
-          | `Satisfied, `Satisfied -> aux `Satisfied ts
-          | `Satisfied, `Undetermined -> aux (`Almost_satisfied t) ts
-          | `Almost_satisfied t, `Satisfied -> aux (`Almost_satisfied t) ts
-          | `Almost_satisfied _, `Undetermined -> aux `Undetermined ts
-          | `Contradicted, _ -> `Contradicted
-          | _, `Contradicted -> `Contradicted
-          | `Undetermined, _ -> aux `Undetermined ts)
+          | All_satisfied, Satisfied -> aux All_satisfied ts
+          | All_satisfied, Undetermined -> aux (Almost_satisfied t) ts
+          | Almost_satisfied t, Satisfied -> aux (Almost_satisfied t) ts
+          | Almost_satisfied _, Undetermined -> aux Incomp_undetermined ts
+          | Some_contradicted, _ -> Some_contradicted
+          | _, Contradicted -> Some_contradicted
+          | Incomp_undetermined, _ -> aux Incomp_undetermined ts)
     in
-    aux `Satisfied incomp.terms
+    aux All_satisfied incomp.terms
 
   let normalise_terms terms =
     let tbl = Hashtbl.create (List.length terms) in
@@ -232,7 +240,7 @@ module Make (N : NAME) (V : VERSION) = struct
           match find_earliest_satisfier incomp assignments with
           | [] -> (
               match incompatibility_status (assignment :: assignments) incomp with
-              | `Satisfied -> assignment :: assignments
+              | All_satisfied -> assignment :: assignments
               | _ -> [])
           | solution -> solution)
     in
@@ -244,7 +252,7 @@ module Make (N : NAME) (V : VERSION) = struct
               match
                 incompatibility_status (satisfier :: assignment :: assignments) incomp
               with
-              | `Satisfied -> assignment :: assignments
+              | All_satisfied -> assignment :: assignments
               | _ -> [])
           | solution -> solution)
     in
@@ -327,7 +335,7 @@ module Make (N : NAME) (V : VERSION) = struct
     | [] -> unit_propagation state changed
     | incomp :: incomps -> (
         match incompatibility_status state.solution incomp with
-        | `Satisfied -> (
+        | All_satisfied -> (
             match conflict_resolution state incomp incomp with
             | Ok (state, incomp, term) ->
                 let assignment = Derivation (negate_term term, incomp) in
@@ -342,7 +350,7 @@ module Make (N : NAME) (V : VERSION) = struct
                 in
                 unit_propagation state [ name ]
             | Error incomp -> Error incomp)
-        | `Almost_satisfied term ->
+        | Almost_satisfied term ->
             let assignment = Derivation (negate_term term, incomp) in
             debug_printf "new assignment on level %d: %a\n" state.decision_level
               pp_assignment assignment;
@@ -438,7 +446,7 @@ module Make (N : NAME) (V : VERSION) = struct
                 List.find_opt
                   (fun i ->
                     match incompatibility_status solution i with
-                    | `Satisfied -> true
+                    | All_satisfied -> true
                     | _ -> false)
                   incomps
               with
