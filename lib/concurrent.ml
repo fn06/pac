@@ -17,7 +17,7 @@ let encode_dep g ((n, v), (m, vs)) =
     let intermediate =
       Name (Format.asprintf "<%a-%a-%a>" pp_name n pp_version v pp_name m)
     in
-    let gvs = VersionSet.to_list granular in
+    let gvs = VersionSet.elements granular in
     let dependant = [ ((encode_name n (g v), v), (intermediate, gvs)) ] in
     let intermediates =
       List.concat_map
@@ -42,7 +42,7 @@ let encode g core =
             let intermediate =
               Name (Format.asprintf "<%a-%a-%a>" pp_name n pp_version v pp_name m)
             in
-            let gvs = VersionSet.to_list granular in
+            let gvs = VersionSet.elements granular in
             List.map (fun v -> (intermediate, v)) gvs @ acc)
         [] deps
   in
