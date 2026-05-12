@@ -92,6 +92,21 @@ let negate_term = function
   | Pos, name, versions -> (Neg, name, versions)
   | Neg, name, versions -> (Pos, name, versions)
 
+let term_satisfies (sp, _, svs) (tp, _, tvs) =
+  match (sp, tp) with
+  | Pos, Pos -> subset svs tvs
+  | Neg, Neg -> subset tvs svs
+  | Pos, Neg -> disjoint svs tvs
+  | Neg, Pos -> false
+
+(* not (a \ b) viewed as version sets *)
+let term_not_difference (sp, sn, svs) (tp, _, tvs) =
+  match (sp, tp) with
+  | Pos, Pos -> (Neg, sn, minus svs tvs)
+  | Neg, Pos -> (Pos, sn, List.sort_uniq compare (svs @ tvs))
+  | Pos, Neg -> (Neg, sn, intersect svs tvs)
+  | Neg, Neg -> (Neg, sn, minus tvs svs)
+
 let term_status solution term =
   let rec solution_versions name = function
     | [] -> (None, None)
@@ -223,13 +238,18 @@ let rec conflict_resolution state original_incomp incomp :
           in
           let state = { incomps; solution; decision_level = previous_satisfier_level } in
           Ok (state, incomp, term)
-      | Derivation (_, cause), _ ->
+      | Derivation (satisfier_term, cause), _ ->
+          let base_terms =
+            incomp.terms @ cause.terms
+            |> List.filter (fun t -> term_name t <> term_name term)
+          in
+          let partial_satisfier_term =
+            if term_satisfies satisfier_term term then []
+            else [ term_not_difference satisfier_term term ]
+          in
           let prior_cause =
             {
-              terms =
-                incomp.terms @ cause.terms
-                |> List.filter (fun t -> term_name t <> term_name term)
-                |> normalise_terms;
+              terms = normalise_terms (base_terms @ partial_satisfier_term);
               cause = Derived (incomp, cause);
             }
           in
