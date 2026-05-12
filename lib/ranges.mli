@@ -6,9 +6,7 @@ module type ORDERED = sig
 end
 
 module Make (V : ORDERED) : sig
-  type bound = Unbounded | Included of V.t | Excluded of V.t
-  type segment = bound * bound
-  type t = segment list
+  type t
 
   val empty : t
   val full : t
