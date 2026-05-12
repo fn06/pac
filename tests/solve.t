@@ -120,8 +120,6 @@
   unit propagation on: foo
   deciding on foo: (1.0.0, 2.0.0)
   trying version 2.0.0
-  dependency incompatibilities
-  	(terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))
   not adding due to incompatibility (terms: {foo (2.0.0)}, cause: ((terms: {bar (1.0.0), not foo (1.0.0)}, cause: dependency bar 1.0.0 -> foo (1.0.0)) and (terms: {foo (2.0.0), not bar (1.0.0)}, cause: dependency foo 2.0.0 -> bar (1.0.0))))
   trying version 1.0.0
   assignment on level 1: Decision foo 1.0.0
@@ -193,9 +191,6 @@
   unit propagation on: target
   deciding on foo: (1.0.0, 1.1.0)
   trying version 1.1.0
-  dependency incompatibilities
-  	(terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
-  	(terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
   not adding due to incompatibility (terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
   trying version 1.0.0
   assignment on level 2: Decision foo 1.0.0
@@ -297,3 +292,7 @@ term) to priorCause"). This causes the over-strong incompatibility
 that no solution exists.
   $ pac solve -f partial-satisfier-bug.pac -q 'a ( 1 2 ) b ( 1 ) c ( 1 )'
   a 1, c 1, b 1
+Dependency collapsing: when multiple versions share a dependency, the collapsed
+incompatibility should be emitted and deduplicated.
+  $ pac solve -f collapse-dedup-bug.pac -q 'a ( 1 2 )'
+  b 1, a 2
