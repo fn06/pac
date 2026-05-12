@@ -338,17 +338,26 @@ let make_decision version_map dependency_map state =
         | Some (pvs', nvs') -> Ok (Some (pvs', intersect nvs nvs')))
     | _ :: assignments -> find_versions name assignments
   in
-  let rec find_undecided_term = function
-    | [] -> None
-    | (Derivation ((Pos, name, _), _), _) :: solution when name != RootName -> (
-        match find_versions name state.solution with
-        | Ok (Some (pvs, nvs)) ->
-            let vs = minus pvs nvs in
-            Some (name, vs)
-        | _ -> find_undecided_term solution)
-    | _ :: solution -> find_undecided_term solution
+  let find_undecided_term () =
+    let rec aux best = function
+      | [] -> best
+      | (Derivation ((Pos, name, _), _), _) :: solution when name != RootName -> (
+          match find_versions name state.solution with
+          | Ok (Some (pvs, nvs)) ->
+              let vs = minus pvs nvs in
+              let n = List.length (intersect (Hashtbl.find_all version_map name) vs) in
+              let best =
+                match best with
+                | Some (_, _, c) when c <= n -> best
+                | _ -> Some (name, vs, n)
+              in
+              aux best solution
+          | _ -> aux best solution)
+      | _ :: solution -> aux best solution
+    in
+    aux None state.solution |> Option.map (fun (name, vs, _) -> (name, vs))
   in
-  let* name, vs = find_undecided_term state.solution in
+  let* name, vs = find_undecided_term () in
   debug_printf "deciding on %a: %a\n" pp_name name pp_versions vs;
   let decision_level = state.decision_level + 1 in
   (* Filter to only versions that are actually available *)

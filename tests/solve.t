@@ -26,17 +26,19 @@
   unit propagation on: B
   new assignment on level 2: Derivation D (1, 2) due to incompatibility (terms: {B (1), not D (1, 2)}, cause: dependency B 1 -> D (1, 2))
   unit propagation on: D
-  deciding on D: (1, 2)
-  trying version 2
-  assignment on level 3: Decision D 2
-  unit propagation on: D
   deciding on C: (1)
   trying version 1
   dependency incompatibilities
   	(terms: {C (1), not D (2, 3)}, cause: dependency C 1 -> D (2, 3))
-  assignment on level 4: Decision C 1
+  assignment on level 3: Decision C 1
   unit propagation on: C
-  C 1, D 2, B 1, A 1
+  new assignment on level 3: Derivation D (2, 3) due to incompatibility (terms: {C (1), not D (2, 3)}, cause: dependency C 1 -> D (2, 3))
+  unit propagation on: D
+  deciding on D: (2)
+  trying version 2
+  assignment on level 4: Decision D 2
+  unit propagation on: D
+  D 2, C 1, B 1, A 1
   $ pac solve -f simple.pac -q 'foo ( 1.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
@@ -137,39 +139,36 @@
   unit propagation on: foo
   unit propagation on: target
   unit propagation on: Root
+  deciding on target: (2.0.0)
+  trying version 2.0.0
+  assignment on level 1: Decision target 2.0.0
+  unit propagation on: target
   deciding on foo: (1.0.0, 1.1.0)
   trying version 1.1.0
   dependency incompatibilities
   	(terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
   	(terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
-  assignment on level 1: Decision foo 1.1.0
+  assignment on level 2: Decision foo 1.1.0
   unit propagation on: foo
-  new assignment on level 1: Derivation right (1.0.0) due to incompatibility (terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
-  new assignment on level 1: Derivation left (1.0.0) due to incompatibility (terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
+  new assignment on level 2: Derivation right (1.0.0) due to incompatibility (terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
+  new assignment on level 2: Derivation left (1.0.0) due to incompatibility (terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
   unit propagation on: left
   unit propagation on: right
   deciding on left: (1.0.0)
   trying version 1.0.0
   dependency incompatibilities
   	(terms: {left (1.0.0), not shared (1.0.0, 2.0.0)}, cause: dependency left 1.0.0 -> shared (1.0.0, 2.0.0))
-  assignment on level 2: Decision left 1.0.0
+  assignment on level 3: Decision left 1.0.0
   unit propagation on: left
-  new assignment on level 2: Derivation shared (1.0.0, 2.0.0) due to incompatibility (terms: {left (1.0.0), not shared (1.0.0, 2.0.0)}, cause: dependency left 1.0.0 -> shared (1.0.0, 2.0.0))
-  unit propagation on: shared
-  deciding on shared: (1.0.0, 2.0.0)
-  trying version 2.0.0
-  assignment on level 3: Decision shared 2.0.0
+  new assignment on level 3: Derivation shared (1.0.0, 2.0.0) due to incompatibility (terms: {left (1.0.0), not shared (1.0.0, 2.0.0)}, cause: dependency left 1.0.0 -> shared (1.0.0, 2.0.0))
   unit propagation on: shared
   deciding on right: (1.0.0)
   trying version 1.0.0
   dependency incompatibilities
   	(terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
-  not adding due to incompatibility (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
+  assignment on level 4: Decision right 1.0.0
   unit propagation on: right
-  conflict resolution on: (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
-  satisfiying assignment on level 3: Decision shared 2.0.0
-  backtracking to level 1
-  new assignment on level 1: Derivation shared (1.0.0) due to incompatibility (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
+  new assignment on level 4: Derivation shared (1.0.0) due to incompatibility (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
   unit propagation on: shared
   deciding on shared: (1.0.0)
   trying version 1.0.0
@@ -178,7 +177,7 @@
   not adding due to incompatibility (terms: {shared (1.0.0), not target (1.0.0)}, cause: dependency shared 1.0.0 -> target (1.0.0))
   unit propagation on: shared
   conflict resolution on: (terms: {shared (1.0.0), not target (1.0.0)}, cause: dependency shared 1.0.0 -> target (1.0.0))
-  satisfiying assignment on level 1: Derivation shared (1.0.0) due to incompatibility (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
+  satisfiying assignment on level 4: Derivation shared (1.0.0) due to incompatibility (terms: {right (1.0.0), not shared (1.0.0)}, cause: dependency right 1.0.0 -> shared (1.0.0))
   backtracking to level 0
   new assignment on level 0: Derivation not shared (1.0.0) due to incompatibility (terms: {shared (1.0.0), not target (1.0.0)}, cause: dependency shared 1.0.0 -> target (1.0.0))
   unit propagation on: shared
@@ -188,6 +187,10 @@
   new assignment on level 0: Derivation not foo (1.1.0) due to incompatibility (terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
   unit propagation on: foo
   unit propagation on: right
+  deciding on target: (2.0.0)
+  trying version 2.0.0
+  assignment on level 1: Decision target 2.0.0
+  unit propagation on: target
   deciding on foo: (1.0.0, 1.1.0)
   trying version 1.1.0
   dependency incompatibilities
@@ -195,13 +198,9 @@
   	(terms: {foo (1.1.0), not left (1.0.0)}, cause: dependency foo 1.1.0 -> left (1.0.0))
   not adding due to incompatibility (terms: {foo (1.1.0), not right (1.0.0)}, cause: dependency foo 1.1.0 -> right (1.0.0))
   trying version 1.0.0
-  assignment on level 1: Decision foo 1.0.0
+  assignment on level 2: Decision foo 1.0.0
   unit propagation on: foo
-  deciding on target: (2.0.0)
-  trying version 2.0.0
-  assignment on level 2: Decision target 2.0.0
-  unit propagation on: target
-  target 2.0.0, foo 1.0.0
+  foo 1.0.0, target 2.0.0
   $ pac solve -f linear-error.pac -q 'foo ( 1.0.0 ) baz ( 1.0.0 )' -d
   initial incompatibilities
   	(terms: {not Root (Root)}, cause: root)
@@ -297,4 +296,4 @@ term) to priorCause"). This causes the over-strong incompatibility
 '{not b (2), not c (2)}' to be learned, which cascades into a false conclusion
 that no solution exists.
   $ pac solve -f partial-satisfier-bug.pac -q 'a ( 1 2 ) b ( 1 ) c ( 1 )'
-  c 1, b 1, a 1
+  a 1, c 1, b 1
