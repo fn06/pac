@@ -1,20 +1,8 @@
 open Import
 open Option.Syntax
-open Result.Syntax
 
-module type NAME = sig
-  type t
-
-  val compare : t -> t -> int
-  val pp : Format.formatter -> t -> unit
-end
-
-module type VERSION = sig
-  type t
-
-  val compare : t -> t -> int
-  val pp : Format.formatter -> t -> unit
-end
+module type NAME = Ranges.ORDERED
+module type VERSION = Ranges.ORDERED
 
 let debug_enabled = ref false
 
@@ -27,11 +15,14 @@ let debug_printf fmt =
 
 let set_debug enabled = debug_enabled := enabled
 
+module Ranges_mod = Ranges
+
 module Make (N : NAME) (V : VERSION) = struct
+  module Ranges = Ranges_mod.Make (V)
+
   type name = RootName | Name of N.t
   type version = RootVersion | Version of V.t
   type package = name * version
-  type dependency = package * (name * version list)
 
   let compare_name a b =
     match (a, b) with
@@ -55,20 +46,37 @@ module Make (N : NAME) (V : VERSION) = struct
     | RootVersion -> Format.pp_print_string fmt "Root"
     | Version v -> V.pp fmt v
 
-  let pp_versions fmt vs =
-    Format.fprintf fmt "(%a)"
-      Format.(
-        pp_print_list
-          ~pp_sep:(fun fmt () -> Format.pp_print_string fmt ", ")
-          (fun fmt v -> fprintf fmt "%a" pp_version v))
-      vs
-
   let pp_package fmt = function
     | RootName, RootVersion -> Format.fprintf fmt "root"
     | n, v -> Format.fprintf fmt "%a %a" pp_name n pp_version v
 
+  (* Internal ranges over the version type (includes RootVersion) *)
+  module IV = struct
+    type t = version
+
+    let compare = compare_version
+    let pp = pp_version
+  end
+
+  module R = Ranges_mod.Make (IV)
+
+  (* Convert external Ranges.t (over V.t) to internal R.t (over version) *)
+  let internalize_bound = function
+    | Ranges.Unbounded -> R.Unbounded
+    | Ranges.Included v -> R.Included (Version v)
+    | Ranges.Excluded v -> R.Excluded (Version v)
+
+  let internalize_range (r : Ranges.t) : R.t =
+    List.map
+      (fun ((lo, hi) : Ranges.segment) ->
+        ((internalize_bound lo, internalize_bound hi) : R.segment))
+      r
+
+  let root_singleton = R.singleton RootVersion
+
   type polarity = Pos | Neg
-  type term = polarity * name * version list
+  type term = polarity * name * R.t
+  type dependency = package * (name * R.t)
 
   type cause =
     | RootCause
@@ -93,7 +101,7 @@ module Make (N : NAME) (V : VERSION) = struct
     | Neg -> Format.fprintf fmt "%s" "not "
 
   let pp_term fmt (p, n, vs) =
-    Format.fprintf fmt "%a%a %a" pp_polarity p pp_name n pp_versions vs
+    Format.fprintf fmt "%a%a %a" pp_polarity p pp_name n R.pp vs
 
   let pp_terms fmt terms =
     Format.fprintf fmt "{%a}"
@@ -106,9 +114,8 @@ module Make (N : NAME) (V : VERSION) = struct
   let rec pp_cause fmt = function
     | RootCause -> Format.pp_print_string fmt "root"
     | NoVersions -> Format.pp_print_string fmt "no versions"
-    | Dependency dep ->
-        Format.fprintf fmt "dependency %a -> %a %a" pp_package (fst dep) pp_name
-          (fst (snd dep)) pp_versions (snd (snd dep))
+    | Dependency (pkg, (n, r)) ->
+        Format.fprintf fmt "dependency %a -> %a %a" pp_package pkg pp_name n R.pp r
     | Derived (i1, i2) ->
         Format.fprintf fmt "(%a and %a)" pp_incompatibility i1 pp_incompatibility i2
 
@@ -136,62 +143,54 @@ module Make (N : NAME) (V : VERSION) = struct
         (fun fmt (a, d) -> fprintf fmt "(%d: %a)" d pp_assignment a))
       fmt
 
-  let intersect a b = List.filter (fun e -> List.mem e b) a
-  let subset a b = List.for_all (fun e -> List.mem e b) a
-  let disjoint a b = not (List.exists (fun e -> List.mem e b) a)
-  let minus a b = List.filter (fun e -> not (List.mem e b)) a
-  let term_name = function Pos, name, _ | Neg, name, _ -> name
+  let term_name = function _, name, _ -> name
 
   let negate_term = function
-    | Pos, name, versions -> (Neg, name, versions)
-    | Neg, name, versions -> (Pos, name, versions)
+    | Pos, name, r -> (Neg, name, r)
+    | Neg, name, r -> (Pos, name, r)
 
-  let term_satisfies (sp, _, svs) (tp, _, tvs) =
+  let term_satisfies (sp, _, sr) (tp, _, tr) =
     match (sp, tp) with
-    | Pos, Pos -> subset svs tvs
-    | Neg, Neg -> subset tvs svs
-    | Pos, Neg -> disjoint svs tvs
+    | Pos, Pos -> R.subset_of sr tr
+    | Neg, Neg -> R.subset_of tr sr
+    | Pos, Neg -> R.is_disjoint sr tr
     | Neg, Pos -> false
 
   (* not (a \ b) viewed as version sets *)
-  let term_not_difference (sp, sn, svs) (tp, _, tvs) =
+  let term_not_difference (sp, sn, sr) (tp, _, tr) =
     match (sp, tp) with
-    | Pos, Pos -> (Neg, sn, minus svs tvs)
-    | Neg, Pos -> (Pos, sn, List.sort_uniq compare_version (svs @ tvs))
-    | Pos, Neg -> (Neg, sn, intersect svs tvs)
-    | Neg, Neg -> (Neg, sn, minus tvs svs)
+    | Pos, Pos -> (Neg, sn, R.difference sr tr)
+    | Neg, Pos -> (Pos, sn, R.union sr tr)
+    | Pos, Neg -> (Neg, sn, R.intersection sr tr)
+    | Neg, Neg -> (Neg, sn, R.difference tr sr)
 
-  let term_status solution term =
-    let rec solution_versions name = function
-      | [] -> (None, None)
-      | (Decision (n, v), _) :: _ when compare_name n name = 0 -> (Some [ v ], None)
-      | (Derivation ((Pos, n, pvs), _), _) :: solution when compare_name n name = 0
-        -> (
-          match solution_versions name solution with
-          | None, nvs -> (Some pvs, nvs)
-          | Some pvs', nvs -> (Some (intersect pvs pvs'), nvs))
-      | (Derivation ((Neg, n, nvs), _), _) :: solution when compare_name n name = 0
-        -> (
-          match solution_versions name solution with
-          | pvs, None -> (pvs, Some nvs)
-          | pvs', Some nvs' -> (pvs', Some (intersect nvs nvs')))
-      | _ :: solution -> solution_versions name solution
+  (* Compute the effective range for a name from the solution, and whether
+     there's any positive derivation for it. *)
+  let solution_range name solution =
+    let rec aux has_pos = function
+      | [] -> (has_pos, R.full)
+      | (Decision (n, v), _) :: _ when compare_name n name = 0 -> (true, R.singleton v)
+      | (Derivation ((Pos, n, r), _), _) :: rest when compare_name n name = 0 ->
+          let _, sr = aux true rest in
+          (true, R.intersection r sr)
+      | (Derivation ((Neg, n, r), _), _) :: rest when compare_name n name = 0 ->
+          let has_pos, sr = aux has_pos rest in
+          (has_pos, R.intersection (R.complement r) sr)
+      | _ :: rest -> aux has_pos rest
     in
-    let pol, name, vs = term in
-    match solution_versions name solution with
-    | None, None -> `Undetermined
-    | None, Some nvs' -> (
-        match pol with
-        | Neg -> if subset nvs' vs then `Satisfied else `Undetermined
-        | Pos -> `Contradicted)
-    | Some pvs', nvs' -> (
-        let vs' = match nvs' with Some nvs' -> minus pvs' nvs' | None -> pvs' in
-        match (pol, subset vs' vs, disjoint vs' vs) with
-        | Pos, true, _ -> `Satisfied
-        | Pos, _, true -> `Contradicted
-        | Neg, _, true -> `Satisfied
-        | Neg, true, _ -> `Contradicted
-        | _, false, false -> `Undetermined)
+    aux false solution
+
+  let term_status solution (pol, name, vs) =
+    let has_positive, sr = solution_range name solution in
+    match (has_positive, pol) with
+    | false, Pos -> `Contradicted
+    | false, Neg -> if R.is_disjoint sr vs then `Satisfied else `Undetermined
+    | true, _ ->
+        if R.subset_of sr vs then
+          match pol with Pos -> `Satisfied | Neg -> `Contradicted
+        else if R.is_disjoint sr vs then
+          match pol with Pos -> `Contradicted | Neg -> `Satisfied
+        else `Undetermined
 
   let incompatibility_status solution incomp =
     let rec aux s = function
@@ -213,7 +212,7 @@ module Make (N : NAME) (V : VERSION) = struct
     List.iter
       (function
         | Neg, RootName, _ -> ()
-        | pol, name, vs -> (
+        | pol, name, r -> (
             let key =
               List.find_opt
                 (fun k -> compare_name k name = 0)
@@ -222,13 +221,13 @@ module Make (N : NAME) (V : VERSION) = struct
             let key = match key with Some k -> k | None -> name in
             let replace = Hashtbl.replace tbl key in
             match Hashtbl.find_opt tbl key with
-            | None -> replace (pol, vs)
-            | Some (pol', vs') -> (
+            | None -> replace (pol, r)
+            | Some (pol', r') -> (
                 match (pol, pol') with
-                | Pos, Pos | Neg, Neg -> replace (pol, intersect vs vs')
-                | Pos, Neg | Neg, Pos -> replace (Pos, if pol = Pos then vs else vs'))))
+                | Pos, Pos | Neg, Neg -> replace (pol, R.intersection r r')
+                | Pos, Neg | Neg, Pos -> replace (Pos, if pol = Pos then r else r'))))
       terms;
-    Hashtbl.fold (fun name (pol, vs) acc -> (pol, name, vs) :: acc) tbl []
+    Hashtbl.fold (fun name (pol, r) acc -> (pol, name, r) :: acc) tbl []
 
   let rec conflict_resolution state original_incomp incomp :
       (state * incompatibility * term, incompatibility) Result.t =
@@ -256,7 +255,8 @@ module Make (N : NAME) (V : VERSION) = struct
           | solution -> solution)
     in
     match incomp.terms with
-    | [] | [ (Pos, RootName, [ RootVersion ]) ] -> Error incomp
+    | [] -> Error incomp
+    | [ (Pos, RootName, r) ] when R.subset_of r root_singleton -> Error incomp
     | _ -> (
         let (satisfier, satisfier_decision_level), assignments =
           match find_earliest_satisfier incomp state.solution with
@@ -304,8 +304,7 @@ module Make (N : NAME) (V : VERSION) = struct
         | Derivation (satisfier_term, cause), _ ->
             let base_terms =
               incomp.terms @ cause.terms
-              |> List.filter (fun t ->
-                     compare_name (term_name t) (term_name term) <> 0)
+              |> List.filter (fun t -> compare_name (term_name t) (term_name term) <> 0)
             in
             let partial_satisfier_term =
               if term_satisfies satisfier_term term then []
@@ -326,12 +325,9 @@ module Make (N : NAME) (V : VERSION) = struct
     | name :: changed ->
         debug_printf "unit propagation on: %a\n" pp_name name;
         let incomps =
-          let term_names terms = List.map term_name terms in
           List.filter
             (fun incomp ->
-              List.exists
-                (fun n -> compare_name n name = 0)
-                (term_names incomp.terms))
+              List.exists (fun t -> compare_name (term_name t) name = 0) incomp.terms)
             state.incomps
         in
         incompat_propagation state changed incomps
@@ -367,70 +363,59 @@ module Make (N : NAME) (V : VERSION) = struct
 
   let dependency_incomps dependency_map version_map (name, version) =
     List.map
-      (fun (dep_name, dep_versions) ->
+      (fun (dep_name, dep_range) ->
         let depender_versions =
           Hashtbl.find_all version_map name
           |> List.filter (fun v ->
                  List.exists
-                   (fun (dn, dvs) -> dn = dep_name && dvs = dep_versions)
+                   (fun (dn, dr) -> compare_name dn dep_name = 0 && dr = dep_range)
                    (Hashtbl.find_all dependency_map (name, v)))
         in
+        let depender_range = R.of_list depender_versions in
         {
-          terms =
-            [ (Pos, name, depender_versions); (Neg, dep_name, dep_versions) ];
-          cause = Dependency ((name, version), (dep_name, dep_versions));
+          terms = [ (Pos, name, depender_range); (Neg, dep_name, dep_range) ];
+          cause = Dependency ((name, version), (dep_name, dep_range));
         })
       (Hashtbl.find_all dependency_map (name, version))
 
   let make_decision version_map dependency_map state =
-    let rec find_versions name = function
-      | [] -> Ok None
-      | (Decision (n, _), _) :: _ when compare_name n name = 0 -> Error None
-      | (Derivation ((Pos, n, pvs), _), _) :: assignments
-        when compare_name n name = 0 -> (
-          let> r = find_versions name assignments in
-          match r with
-          | None -> Ok (Some (pvs, []))
-          | Some (pvs', nvs') -> Ok (Some (intersect pvs pvs', nvs')))
-      | (Derivation ((Neg, n, nvs), _), _) :: assignments
-        when compare_name n name = 0 -> (
-          let> r = find_versions name assignments in
-          match r with
-          | None -> Ok (Some ([], nvs))
-          | Some (pvs', nvs') -> Ok (Some (pvs', intersect nvs nvs')))
-      | _ :: assignments -> find_versions name assignments
-    in
     let find_undecided_term () =
       let rec aux best = function
         | [] -> best
         | (Derivation ((Pos, name, _), _), _) :: solution
-          when compare_name name RootName <> 0 -> (
-            match find_versions name state.solution with
-            | Ok (Some (pvs, nvs)) ->
-                let vs = minus pvs nvs in
-                let n =
-                  List.length (intersect (Hashtbl.find_all version_map name) vs)
-                in
-                let best =
-                  match best with
-                  | Some (_, _, c) when c <= n -> best
-                  | _ -> Some (name, vs, n)
-                in
-                aux best solution
-            | _ -> aux best solution)
+          when compare_name name RootName <> 0 ->
+            let _, sr = solution_range name state.solution in
+            let real_vs =
+              List.filter (fun v -> R.contains v sr) (Hashtbl.find_all version_map name)
+            in
+            let decided =
+              List.exists
+                (fun (a, _) ->
+                  match a with Decision (n, _) -> compare_name n name = 0 | _ -> false)
+                state.solution
+            in
+            if decided then aux best solution
+            else
+              let n = List.length real_vs in
+              let best =
+                match best with
+                | Some (_, _, c) when c <= n -> best
+                | _ -> Some (name, real_vs, n)
+              in
+              aux best solution
         | _ :: solution -> aux best solution
       in
       aux None state.solution |> Option.map (fun (name, vs, _) -> (name, vs))
     in
-    let* name, vs = find_undecided_term () in
-    debug_printf "deciding on %a: %a\n" pp_name name pp_versions vs;
+    let* name, real_vs = find_undecided_term () in
+    let _, sr = solution_range name state.solution in
+    debug_printf "deciding on %a: %a\n" pp_name name R.pp sr;
     let decision_level = state.decision_level + 1 in
-    let real_vs = intersect (Hashtbl.find_all version_map name) vs in
     match real_vs with
     | [] ->
-        let incomp = { terms = [ (Pos, name, vs) ]; cause = NoVersions } in
-        debug_printf "no versions found, adding incompatiblity %a\n"
-          pp_incompatibility incomp;
+        let incomp = { terms = [ (Pos, name, sr) ]; cause = NoVersions } in
+        debug_printf "no versions found, adding incompatiblity %a\n" pp_incompatibility
+          incomp;
         let state = { state with incomps = incomp :: state.incomps } in
         Some (name, state)
     | _ ->
@@ -441,12 +426,11 @@ module Make (N : NAME) (V : VERSION) = struct
               let dep_incomps =
                 dependency_incomps dependency_map version_map (name, version)
                 |> List.filter (fun i ->
-                       not
-                         (List.exists (fun i' -> i'.terms = i.terms) state.incomps))
+                       not (List.exists (fun i' -> i'.terms = i.terms) state.incomps))
               in
               if List.length dep_incomps > 0 then
-                debug_printf "dependency incompatibilities\n\t%a\n"
-                  pp_incompatibilities dep_incomps;
+                debug_printf "dependency incompatibilities\n\t%a\n" pp_incompatibilities
+                  dep_incomps;
               let incomps = dep_incomps @ state.incomps in
               let state = { state with incomps } in
               let assignment = Decision (name, version) in
@@ -460,62 +444,50 @@ module Make (N : NAME) (V : VERSION) = struct
                   incomps
               with
               | Some incomp ->
-                  debug_printf "not adding due to incompatibility %a\n"
-                    pp_incompatibility incomp;
+                  debug_printf "not adding due to incompatibility %a\n" pp_incompatibility
+                    incomp;
                   try_versions state versions
               | None ->
-                  debug_printf "assignment on level %d: %a\n" decision_level
-                    pp_assignment assignment;
+                  debug_printf "assignment on level %d: %a\n" decision_level pp_assignment
+                    assignment;
                   let state = { incomps; solution; decision_level } in
                   Some (name, state))
         in
-        try_versions state
-          (List.sort (fun a b -> compare_version b a) real_vs)
+        try_versions state (List.sort (fun a b -> compare_version b a) real_vs)
 
   let extract_resolution state =
-    List.filter_map
-      (function
-        | assignment, _decision_level -> (
-            match assignment with Decision pkg -> Some pkg | _ -> None))
-      state.solution
+    List.filter_map (function Decision pkg, _ -> Some pkg | _ -> None) state.solution
 
   let init_incomps dependency_map =
-    { terms = [ (Neg, RootName, [ RootVersion ]) ]; cause = RootCause }
+    { terms = [ (Neg, RootName, root_singleton) ]; cause = RootCause }
     :: List.map
-         (fun ((name, versions) as dep) ->
+         (fun ((dep_name, dep_range) as dep) ->
            {
-             terms =
-               [
-                 (Pos, RootName, [ RootVersion ]);
-                 (Neg, name, versions);
-               ];
+             terms = [ (Pos, RootName, root_singleton); (Neg, dep_name, dep_range) ];
              cause = Dependency ((RootName, RootVersion), dep);
            })
          (Hashtbl.find_all dependency_map (RootName, RootVersion))
 
   type repository = (N.t * V.t) list
-  type dependencies = ((N.t * V.t) * (N.t * V.t list)) list
-  type query = (N.t * V.t list) list
+  type dependencies = ((N.t * V.t) * (N.t * Ranges.t)) list
+  type query = (N.t * Ranges.t) list
 
-  let resolve (repository : repository) (dependencies : dependencies)
-      (query : query) : ((N.t * V.t) list, incompatibility) Result.t =
+  let resolve (repository : repository) (dependencies : dependencies) (query : query) :
+      ((N.t * V.t) list, incompatibility) Result.t =
     let version_map = Hashtbl.create 0 in
     List.iter
-      (fun (name, version) ->
-        Hashtbl.add version_map (Name name) (Version version))
+      (fun (name, version) -> Hashtbl.add version_map (Name name) (Version version))
       repository;
     let dependency_map = Hashtbl.create 0 in
     List.iter
-      (fun ((n, v), (dep_name, dep_versions)) ->
-        Hashtbl.add dependency_map
-          (Name n, Version v)
-          (Name dep_name, List.map (fun v -> Version v) dep_versions))
+      (fun ((n, v), (dep_name, dep_range)) ->
+        Hashtbl.add dependency_map (Name n, Version v)
+          (Name dep_name, internalize_range dep_range))
       dependencies;
     List.iter
-      (fun (name, versions) ->
-        Hashtbl.add dependency_map
-          (RootName, RootVersion)
-          (Name name, List.map (fun v -> Version v) versions))
+      (fun (name, range) ->
+        Hashtbl.add dependency_map (RootName, RootVersion)
+          (Name name, internalize_range range))
       query;
     let rec solve_loop state next =
       match unit_propagation state [ next ] with
@@ -529,16 +501,12 @@ module Make (N : NAME) (V : VERSION) = struct
     debug_printf "initial incompatibilities\n\t%a\n" pp_incompatibilities incomps;
     solve_loop { incomps; solution = []; decision_level = 0 } RootName
     |> Result.map
-         (List.filter_map (function
-           | Name n, Version v -> Some (n, v)
-           | _ -> None))
+         (List.filter_map (function Name n, Version v -> Some (n, v) | _ -> None))
 
   let explain_terms fmt = function
     | [ (Pos, n, vs); (Neg, m, us) ] | [ (Neg, m, us); (Pos, n, vs) ] ->
-        Format.fprintf fmt "%a %a requires %a %a" pp_name n pp_versions vs pp_name
-          m pp_versions us
-    | [] | [ (Pos, RootName, [ RootVersion ]) ] ->
-        Format.fprintf fmt "version solving failed."
+        Format.fprintf fmt "%a %a requires %a %a" pp_name n R.pp vs pp_name m R.pp us
+    | [] | [ (Pos, RootName, _) ] -> Format.fprintf fmt "version solving failed."
     | terms ->
         Format.fprintf fmt "%a is forbidden."
           Format.(
@@ -555,9 +523,7 @@ module Make (N : NAME) (V : VERSION) = struct
       Hashtbl.add line_numbers cause !line_number;
       !line_number
     in
-    let is_external incomp =
-      match incomp.cause with Derived _ -> false | _ -> true
-    in
+    let is_external incomp = match incomp.cause with Derived _ -> false | _ -> true in
     let rec count_caused incomp = function
       | Derived (c1, c2) ->
           (if c1 == incomp then 1 else 0)
@@ -568,30 +534,26 @@ module Make (N : NAME) (V : VERSION) = struct
     let rec explain_incomp fmt incomp =
       match incomp.cause with
       | RootCause -> Format.fprintf fmt "root"
-      | NoVersions ->
-          Format.fprintf fmt "%a not available" explain_terms incomp.terms
-      | Dependency (p, (n, vs)) ->
-          Format.fprintf fmt "%a -> %a %a" pp_package p pp_name n pp_versions vs
+      | NoVersions -> Format.fprintf fmt "%a not available" explain_terms incomp.terms
+      | Dependency (pkg, (n, r)) ->
+          Format.fprintf fmt "%a -> %a %a" pp_package pkg pp_name n R.pp r
       | Derived (cause1, cause2) ->
           (match (is_external cause1, is_external cause2) with
-          (* Case 1 *)
           | false, false -> (
               match
                 ( Hashtbl.find_opt line_numbers cause1,
                   Hashtbl.find_opt line_numbers cause2 )
               with
               | Some line1, Some line2 ->
-                  Format.fprintf fmt "Because %a (%d) and %a (%d), %a."
-                    explain_terms cause1.terms line1 explain_terms cause2.terms
-                    line2 explain_terms incomp.terms
+                  Format.fprintf fmt "Because %a (%d) and %a (%d), %a." explain_terms
+                    cause1.terms line1 explain_terms cause2.terms line2 explain_terms
+                    incomp.terms
               | Some line1, None ->
-                  Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp
-                    cause2 explain_terms cause1.terms line1 explain_terms
-                    incomp.terms
+                  Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp cause2
+                    explain_terms cause1.terms line1 explain_terms incomp.terms
               | None, Some line2 ->
-                  Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp
-                    cause1 explain_terms cause2.terms line2 explain_terms
-                    incomp.terms
+                  Format.fprintf fmt "%a\nAnd because %a (%d), %a." explain_incomp cause1
+                    explain_terms cause2.terms line2 explain_terms incomp.terms
               | None, None -> (
                   let is_simple incomp =
                     match incomp.cause with
@@ -610,18 +572,17 @@ module Make (N : NAME) (V : VERSION) = struct
                   | None ->
                       let line1 = set_line_number cause1 in
                       let line2 = set_line_number cause2 in
-                      Format.fprintf fmt "%a (%d)\n\n%a (%d)\nThus, %a"
-                        explain_incomp cause1 line1 explain_incomp cause2 line2
-                        explain_terms incomp.terms))
-          (* Case 2 *)
+                      Format.fprintf fmt "%a (%d)\n\n%a (%d)\nThus, %a" explain_incomp
+                        cause1 line1 explain_incomp cause2 line2 explain_terms
+                        incomp.terms))
           | false, _ | _, false -> (
               let derived, ext =
                 if is_external cause1 then (cause2, cause1) else (cause1, cause2)
               in
               match Hashtbl.find_opt line_numbers derived with
               | Some line ->
-                  Format.fprintf fmt "Because %a and %a (%d), %a" explain_incomp
-                    ext explain_terms derived.terms line explain_terms incomp.terms
+                  Format.fprintf fmt "Because %a and %a (%d), %a" explain_incomp ext
+                    explain_terms derived.terms line explain_terms incomp.terms
               | None -> (
                   match
                     match derived.cause with
@@ -638,13 +599,12 @@ module Make (N : NAME) (V : VERSION) = struct
                     | _ -> None
                   with
                   | Some (prior_derived, prior_external) ->
-                      Format.fprintf fmt "%a\nAnd because %a and %a, %a"
-                        explain_incomp prior_derived explain_incomp prior_external
-                        explain_incomp ext explain_terms incomp.terms
+                      Format.fprintf fmt "%a\nAnd because %a and %a, %a" explain_incomp
+                        prior_derived explain_incomp prior_external explain_incomp ext
+                        explain_terms incomp.terms
                   | _ ->
-                      Format.fprintf fmt "%a\nAnd because %a, %a" explain_incomp
-                        derived explain_incomp ext explain_terms incomp.terms))
-          (* Case 3 *)
+                      Format.fprintf fmt "%a\nAnd because %a, %a" explain_incomp derived
+                        explain_incomp ext explain_terms incomp.terms))
           | true, true ->
               Format.fprintf fmt "Because %a and %a, %a." explain_incomp cause1
                 explain_incomp cause2 explain_terms incomp.terms);

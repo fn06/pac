@@ -15,16 +15,15 @@ end
 val set_debug : bool -> unit
 
 module Make (N : NAME) (V : VERSION) : sig
+  module Ranges : module type of Ranges.Make (V)
+
   type incompatibility
   type repository = (N.t * V.t) list
-  type dependencies = ((N.t * V.t) * (N.t * V.t list)) list
-  type query = (N.t * V.t list) list
+  type dependencies = ((N.t * V.t) * (N.t * Ranges.t)) list
+  type query = (N.t * Ranges.t) list
 
   val resolve :
-    repository ->
-    dependencies ->
-    query ->
-    ((N.t * V.t) list, incompatibility) Result.t
+    repository -> dependencies -> query -> ((N.t * V.t) list, incompatibility) Result.t
 
   val explain_incompatibility : Format.formatter -> incompatibility -> unit
 end

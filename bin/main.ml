@@ -132,15 +132,14 @@ let solve_cmd filename query_str debug () =
     List.filter_map
       (function
         | (Core.Name n, Core.Version v), (Core.Name dn, dvs) ->
-            Some
-              ( (n, v),
-                ( dn,
-                  List.filter_map
-                    (function Core.Version v -> Some v | _ -> None)
-                    dvs ) )
+            let vs =
+              List.filter_map (function Core.Version v -> Some v | _ -> None) dvs
+            in
+            Some ((n, v), (dn, Solver.Ranges.of_list vs))
         | _ -> None)
       deps
   in
+  let query = List.map (fun (n, vs) -> (n, Solver.Ranges.of_list vs)) query in
   Pubgrub.set_debug debug;
   match Solver.resolve repo deps query with
   | Ok resolution ->
