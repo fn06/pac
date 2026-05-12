@@ -110,22 +110,47 @@ let reduce_cmd filename granularity from_calculus to_calculus () =
   | src, dst when src = dst -> Ast.pp Format.std_formatter instance
   | src, dst -> failwith (Printf.sprintf "Unsupported reduction: %s to %s" src dst)
 
+module StringOrd = struct
+  type t = string
+
+  let compare = String.compare
+  let pp = Format.pp_print_string
+end
+
+module Solver = Pubgrub.Make (StringOrd) (StringOrd)
+
 let solve_cmd filename query_str debug () =
   let instance = parse_instance filename in
   let query = parse_query query_str in
   let repo, deps = Core.of_ast instance in
+  let repo =
+    List.filter_map
+      (function Core.Name n, Core.Version v -> Some (n, v) | _ -> None)
+      repo
+  in
   let deps =
-    List.map
-      (fun (n, vs) ->
-        ( (Core.RootName, Core.RootVersion),
-          (Core.Name n, List.map (fun v -> Core.Version v) vs) ))
-      query
-    @ deps
+    List.filter_map
+      (function
+        | (Core.Name n, Core.Version v), (Core.Name dn, dvs) ->
+            Some
+              ( (n, v),
+                ( dn,
+                  List.filter_map
+                    (function Core.Version v -> Some v | _ -> None)
+                    dvs ) )
+        | _ -> None)
+      deps
   in
   Pubgrub.set_debug debug;
-  match Pubgrub.resolve repo deps with
-  | Ok resolution -> Format.printf "%a\n%!" Core.pp_packages resolution
-  | Error incomp -> Format.printf "%a\n%!" Pubgrub.explain_incompatibility incomp
+  match Solver.resolve repo deps query with
+  | Ok resolution ->
+      Format.printf "%a\n%!"
+        Format.(
+          pp_print_list
+            ~pp_sep:(fun fmt () -> pp_print_string fmt ", ")
+            (fun fmt (n, v) -> fprintf fmt "%s %s" n v))
+        resolution
+  | Error incomp -> Format.printf "%a\n%!" Solver.explain_incompatibility incomp
 
 let file_arg =
   let doc = "Input file with dependency information (stdin used if not specified)" in
