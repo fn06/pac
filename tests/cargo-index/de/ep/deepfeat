@@ -1,0 +1,1 @@
+{"vers": "1.0.0", "deps": [{"name": "shared", "req": "^1", "features": [], "optional": false, "default_features": true, "target": null, "kind": "normal"}], "features": {"boost": ["shared/a"], "default": []}, "yanked": false, "name": "deepfeat"}

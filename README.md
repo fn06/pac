@@ -55,3 +55,27 @@ pac opam -r ~/projects/opam-repository -q 'lwt (>= 5.5), dune'
 pac opam -r ~/projects/opam-repository -q 'eio' --with-test
 pac opam -r tests/opam-repo -q 'gui' --free os   # solver picks the os
 ```
+
+## Cargo frontend
+
+Reduces the crates.io index to the core calculus — the Concurrent Feature
+composition: one synthetic package per semver-compatibility class (majors, and
+0.x minors, coexist), feature packages whose versions form the support
+relation (unification per selected instance), split intermediates choosing a
+class with agreement selectors for `dep/feat` specs, cfg conditions through
+the variable machinery, and the `links` key as a conflict class — a synthetic
+package per native library whose versions are the claimant crates, discovered
+lazily. Fully lazy: only the crates the solver visits are ever parsed. Weak
+feature dependencies (`x?/f`) are omitted from the solve, as in cargo itself,
+which resolves versions as if all features were enabled and applies weak
+features in a post-resolution feature pass. `--dev` includes the
+dev-dependencies of the queried crates — never transitive, so they hang off a
+root-only shim agreeing with the crate's class choice.
+
+```sh
+git clone https://github.com/rust-lang/crates.io-index ~/projects/crates.io-index
+pac cargo -r ~/projects/crates.io-index -q 'serde +derive'
+pac cargo -r ~/projects/crates.io-index -q 'tokio =1.35.0 +full, axum'
+pac cargo -r tests/cargo-index -q 'condy' --free target_family
+pac semver-match 1.0.0-rc.1 '^1'
+```

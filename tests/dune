@@ -3,4 +3,5 @@
   %{bin:pac}
   (glob_files *.test)
   (glob_files_rec opam-repo/*)
+  (glob_files_rec cargo-index/*)
   (glob_files *.pac)))

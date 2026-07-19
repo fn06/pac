@@ -361,6 +361,71 @@ let opam_free_arg =
   let doc = "Leave a variable free for the solver to choose" in
   Arg.(value & opt_all string [] & info [ "free" ] ~docv:"VAR" ~doc)
 
+let cargo_cmd index_dir query_str vars free dev debug () =
+  let index = Cargo_index.create index_dir in
+  let sigma =
+    List.map
+      (fun kv ->
+        match String.index_opt kv '=' with
+        | Some i -> (String.sub kv 0 i, String.sub kv (i + 1) (String.length kv - i - 1))
+        | None -> (kv, "true"))
+      vars
+    @ Cargo_frontend.default_sigma
+  in
+  let cfg = { Cargo_frontend.index; sigma; free; links_seen = Hashtbl.create 16 } in
+  let query =
+    String.split_on_char ',' query_str
+    |> List.map String.trim
+    |> List.filter (( <> ) "")
+    |> List.map (fun atom ->
+           let tokens =
+             String.split_on_char ' ' atom |> List.map String.trim |> List.filter (( <> ) "")
+           in
+           match tokens with
+           | name :: rest ->
+               let feats, reqs =
+                 List.partition (String.starts_with ~prefix:"+") rest
+               in
+               {
+                 Cargo_frontend.q_name = name;
+                 q_req =
+                   (match reqs with
+                   | [] -> Semver.parse_req "*"
+                   | _ -> Semver.parse_req (String.concat "," reqs));
+                 q_feats =
+                   List.map (fun f -> String.sub f 1 (String.length f - 1)) feats;
+               }
+           | [] -> failwith "empty query atom")
+  in
+  Pubgrub.set_debug debug;
+  match Cargo_frontend.solve ~dev cfg query with
+  | Ok solution -> (
+      let pkgs, feats_of, free_choices = Cargo_frontend.decode cfg solution in
+      List.iter (fun (x, v) -> Format.printf "%s = %s\n" x v) free_choices;
+      List.iter
+        (fun (n, v) ->
+          match feats_of (n, v) with
+          | [] -> Format.printf "%s %s\n" n v
+          | fs -> Format.printf "%s %s (%s)\n" n v (String.concat " " fs))
+        pkgs;
+      Format.printf "crates parsed: %d\n" (Cargo_index.crates_parsed index);
+      let dev_roots =
+        if dev then List.map (fun a -> a.Cargo_frontend.q_name) query else []
+      in
+      match Cargo_frontend.check ~dev_roots cfg pkgs feats_of free_choices with
+      | [] -> Format.printf "check: ok\n%!"
+      | errs ->
+          List.iter (fun e -> Format.printf "check: %s\n" e) errs;
+          Format.print_flush ();
+          exit 2)
+  | Error incomp ->
+      Format.printf "%a\n%!" Cargo_frontend.Solver.explain_incompatibility incomp;
+      exit 1
+
+let cargo_semver_cmd v req () =
+  print_endline
+    (if Semver.matches (Semver.parse v) (Semver.parse_req req) then "match" else "no-match")
+
 let deb_compare_cmd v1 v2 () =
   let c = Deb_version.compare (Deb_version.parse v1) (Deb_version.parse v2) in
   print_endline (if c < 0 then "lt" else if c > 0 then "gt" else "eq")
@@ -405,6 +470,29 @@ let opam_term =
 let opam_info =
   Cmd.info "opam" ~doc:"Resolve an opam install request by reduction to the core calculus"
 
+let cargo_index_arg =
+  let doc = "crates.io index directory" in
+  Arg.(required & opt (some dir) None & info [ "r"; "repo" ] ~docv:"DIR" ~doc)
+
+let cargo_dev_arg =
+  let doc = "Include dev-dependencies of the queried crates (never transitive)" in
+  Arg.(value & flag & info [ "dev" ] ~doc)
+
+let cargo_term =
+  Term.(
+    const cargo_cmd $ cargo_index_arg $ debian_query_arg $ opam_var_arg $ opam_free_arg
+    $ cargo_dev_arg $ debug_arg $ const ())
+
+let cargo_info =
+  Cmd.info "cargo" ~doc:"Resolve a cargo install request by reduction to the core calculus"
+
+let sv_arg n docv = Arg.(required & pos n (some string) None & info [] ~docv)
+
+let cargo_semver_term = Term.(const cargo_semver_cmd $ sv_arg 0 "VERSION" $ sv_arg 1 "REQ" $ const ())
+
+let cargo_semver_info =
+  Cmd.info "semver-match" ~doc:"Test a semver version against a cargo requirement"
+
 let () =
   let cmds =
     [
@@ -415,6 +503,8 @@ let () =
       Cmd.v debian_info debian_term;
       Cmd.v deb_compare_info deb_compare_term;
       Cmd.v opam_info opam_term;
+      Cmd.v cargo_info cargo_term;
+      Cmd.v cargo_semver_info cargo_semver_term;
     ]
   in
   let cmd = Cmd.group default_info cmds in

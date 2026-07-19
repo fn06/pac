@@ -5,5 +5,5 @@
 
 (library
  (name pac)
- (libraries pubgrub opam-format)
- (modules ast lexer parser core concurrent import deb_version deb_packages debian opam_repo opam_frontend))
+ (libraries pubgrub opam-format yojson)
+ (modules ast lexer parser core concurrent import deb_version deb_packages debian opam_repo opam_frontend semver cargo_index cargo_frontend))

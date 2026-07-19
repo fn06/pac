@@ -1,0 +1,1 @@
+{"vers": "1.0.0", "deps": [{"name": "extra", "req": "^1", "features": [], "optional": true, "default_features": true, "target": null, "kind": "normal"}], "features": {"plus": ["dep:extra"], "default": []}, "yanked": false, "name": "app"}

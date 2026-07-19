@@ -1,0 +1,1 @@
+{"vers": "1.0.0", "deps": [{"name": "common", "req": "^2", "features": [], "optional": false, "default_features": true, "target": null, "kind": "normal"}], "features": {}, "yanked": false, "name": "right"}
