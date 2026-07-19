@@ -141,7 +141,7 @@ let solve_cmd filename query_str debug () =
   let dependencies n v = Hashtbl.find_all dep_tbl (n, v) in
   let query = List.map (fun (n, vs) -> (n, Solver.Ranges.of_list vs)) query in
   Pubgrub.set_debug debug;
-  match Solver.resolve ~versions ~dependencies query with
+  match Solver.solve ~versions ~dependencies query with
   | Ok resolution ->
       Format.printf "%a\n%!"
         Format.(
