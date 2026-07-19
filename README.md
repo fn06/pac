@@ -79,3 +79,19 @@ pac cargo -r ~/projects/crates.io-index -q 'tokio =1.35.0 +full, axum'
 pac cargo -r tests/cargo-index -q 'condy' --free target_family
 pac semver-match 1.0.0-rc.1 '^1'
 ```
+
+## Alpine (apk) frontend
+
+Reduces an APKINDEX to the core calculus: version constraints (apk's own
+ordering, `~` fuzzy matching), `!name` conflicts as guard packages, namespaced
+virtual provides (`so:`, `cmd:`) as shared selectors with `k:` provider
+priorities as preference, and `install_if` triggers as rule packages whose
+escape branches are preferred -- `pac apk -f APKINDEX -q 'openssl, docs'`
+auto-installs the closure's -doc packages.
+
+```sh
+curl -sO https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/APKINDEX.tar.gz
+tar -xzf APKINDEX.tar.gz APKINDEX
+pac apk -f APKINDEX -q 'nginx, python3'
+pac apk-compare 1.0_rc1 1.0
+```
