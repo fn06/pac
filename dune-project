@@ -19,6 +19,6 @@
  (name pac)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml menhir format cmdliner pubgrub)
+ (depends ocaml menhir format cmdliner pubgrub opam-format)
  (tags
   ("add topics" "to describe" your project)))

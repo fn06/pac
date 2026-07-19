@@ -1,0 +1,8 @@
+opam-version: "2.0"
+depends: [
+  "libjson" {>= "2.0"}
+  ("db-sqlite" | "db-postgres")
+  "unixlib" {os != "win32"}
+  "winlib" {os = "win32"}
+  "testfw" {with-test}
+]

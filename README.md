@@ -35,3 +35,23 @@ pac debian -f Packages -q 'libreoffice, postfix (>= 3.7)'
 pac debian -f Packages -q 'postfix, exim4'   # unsatisfiable, with explanation
 pac deb-compare 1.0~rc1 1.0                  # dpkg version ordering
 ```
+
+## opam frontend
+
+Reduces an opam-repository checkout to the core calculus lazily. Nested
+`&`/`|` dependency formulas become synthetic disjunct packages; filters go
+through the variable-formula reduction as synthetic `<x>` packages, pinned to
+an assignment (`--var os=macos`) or left for the solver to choose
+(`--free os`); conflicts and conflict-classes become guard packages. Depopts
+are correctly ignored (opam 2 semantics). `--with-test`/`--with-doc` enable
+the variable for the queried packages only, as opam does — a root-only shim
+substitutes it into their formulas before encoding, so the global `<x>`
+package stays false and dependencies' test deps stay out (`--var
+with-test=true` remains available as the resolution-wide assignment).
+Resolutions are checked against the elaborated opam semantics.
+
+```sh
+pac opam -r ~/projects/opam-repository -q 'lwt (>= 5.5), dune'
+pac opam -r ~/projects/opam-repository -q 'eio' --with-test
+pac opam -r tests/opam-repo -q 'gui' --free os   # solver picks the os
+```

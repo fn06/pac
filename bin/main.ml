@@ -300,6 +300,67 @@ let debian_cmd file query_str debug () =
       Format.printf "%a\n%!" Debian.Solver.explain_incompatibility incomp;
       exit 1
 
+let opam_cmd repo_dir query_str vars free with_test with_doc debug () =
+  let repo = Opam_repo.load repo_dir in
+  let sigma =
+    List.map
+      (fun kv ->
+        match String.index_opt kv '=' with
+        | Some i ->
+            (String.sub kv 0 i, String.sub kv (i + 1) (String.length kv - i - 1))
+        | None -> (kv, "true"))
+      vars
+    @ Opam_frontend.default_sigma
+  in
+  let root_overrides =
+    (if with_test then [ ("with-test", "true") ] else [])
+    @ if with_doc then [ ("with-doc", "true") ] else []
+  in
+  let cfg = { Opam_frontend.repo; sigma; free; root_overrides; overrides = [] } in
+  let rel_of_deb : Deb_packages.rel -> Opam_repo.rel = function
+    | Lt -> Lt | Le -> Le | Eq -> Eq | Ge -> Ge | Gt -> Gt
+  in
+  let query =
+    Deb_packages.parse_dep_field query_str
+    |> List.map (function
+         | [ (a : Deb_packages.atom) ] ->
+             ( a.dep_name,
+               Option.map
+                 (fun (r, v) -> (rel_of_deb r, Deb_version.to_string v))
+                 a.dep_rel )
+         | _ -> failwith "alternatives are not supported in the query")
+  in
+  Pubgrub.set_debug debug;
+  match Opam_frontend.solve cfg query with
+  | Ok solution -> (
+      let pkgs, free_choices = Opam_frontend.decode cfg solution in
+      List.iter (fun (x, v) -> Format.printf "%s = %s\n" x v) free_choices;
+      List.iter (fun (n, v) -> Format.printf "%s.%s\n" n v) pkgs;
+      let scoped_roots =
+        if root_overrides = [] then [] else List.map fst query
+      in
+      match Opam_frontend.check ~scoped_roots cfg pkgs free_choices with
+      | [] -> Format.printf "check: ok\n%!"
+      | errs ->
+          List.iter (fun e -> Format.printf "check: %s\n" e) errs;
+          Format.print_flush ();
+          exit 2)
+  | Error incomp ->
+      Format.printf "%a\n%!" Opam_frontend.Solver.explain_incompatibility incomp;
+      exit 1
+
+let opam_repo_arg =
+  let doc = "opam repository directory (containing packages/)" in
+  Arg.(required & opt (some dir) None & info [ "r"; "repo" ] ~docv:"DIR" ~doc)
+
+let opam_var_arg =
+  let doc = "Set a variable, e.g. --var os=macos or --var with-test (=true)" in
+  Arg.(value & opt_all string [] & info [ "var" ] ~docv:"K=V" ~doc)
+
+let opam_free_arg =
+  let doc = "Leave a variable free for the solver to choose" in
+  Arg.(value & opt_all string [] & info [ "free" ] ~docv:"VAR" ~doc)
+
 let deb_compare_cmd v1 v2 () =
   let c = Deb_version.compare (Deb_version.parse v1) (Deb_version.parse v2) in
   print_endline (if c < 0 then "lt" else if c > 0 then "gt" else "eq")
@@ -327,6 +388,23 @@ let deb_compare_term =
 let deb_compare_info =
   Cmd.info "deb-compare" ~doc:"Compare two Debian version strings (prints lt/eq/gt)"
 
+let opam_with_test_arg =
+  let doc = "Enable with-test for the queried packages only (never transitive)" in
+  Arg.(value & flag & info [ "with-test" ] ~doc)
+
+let opam_with_doc_arg =
+  let doc = "Enable with-doc for the queried packages only (never transitive)" in
+  Arg.(value & flag & info [ "with-doc" ] ~doc)
+
+let opam_term =
+  Term.(
+    const opam_cmd $ opam_repo_arg $ debian_query_arg $ opam_var_arg $ opam_free_arg
+    $ opam_with_test_arg $ opam_with_doc_arg
+    $ debug_arg $ const ())
+
+let opam_info =
+  Cmd.info "opam" ~doc:"Resolve an opam install request by reduction to the core calculus"
+
 let () =
   let cmds =
     [
@@ -336,6 +414,7 @@ let () =
       Cmd.v solve_info solve_term;
       Cmd.v debian_info debian_term;
       Cmd.v deb_compare_info deb_compare_term;
+      Cmd.v opam_info opam_term;
     ]
   in
   let cmd = Cmd.group default_info cmds in
