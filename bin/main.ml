@@ -276,6 +276,57 @@ let solve_info =
            resolution.";
       ]
 
+let debian_cmd file query_str debug () =
+  let pkgs = Deb_packages.parse_file file in
+  let inst = Debian.load pkgs in
+  let query_atoms =
+    Deb_packages.parse_dep_field query_str
+    |> List.map (function
+         | [ a ] -> a
+         | _ -> failwith "alternatives are not supported in the query")
+  in
+  Pubgrub.set_debug debug;
+  match Debian.solve inst query_atoms with
+  | Ok solution -> (
+      let resolution = Debian.decode solution in
+      List.iter (fun (n, v) -> Format.printf "%s %s\n" n v) resolution;
+      match Debian.check inst resolution with
+      | [] -> Format.printf "check: ok\n%!"
+      | errs ->
+          List.iter (fun e -> Format.printf "check: %s\n" e) errs;
+          Format.print_flush ();
+          exit 2)
+  | Error incomp ->
+      Format.printf "%a\n%!" Debian.Solver.explain_incompatibility incomp;
+      exit 1
+
+let deb_compare_cmd v1 v2 () =
+  let c = Deb_version.compare (Deb_version.parse v1) (Deb_version.parse v2) in
+  print_endline (if c < 0 then "lt" else if c > 0 then "gt" else "eq")
+
+let packages_file_arg =
+  let doc = "Debian Packages file" in
+  Arg.(required & opt (some string) None & info [ "f"; "file" ] ~docv:"FILE" ~doc)
+
+let debian_query_arg =
+  let doc = "Install request, in Depends syntax (e.g. 'curl, postfix (>= 3.7)')" in
+  Arg.(required & opt (some string) None & info [ "q"; "query" ] ~docv:"QUERY" ~doc)
+
+let debian_term =
+  Term.(const debian_cmd $ packages_file_arg $ debian_query_arg $ debug_arg $ const ())
+
+let debian_info =
+  Cmd.info "debian"
+    ~doc:"Resolve a Debian install request by reduction to the core calculus"
+
+let ver_arg n docv = Arg.(required & pos n (some string) None & info [] ~docv)
+
+let deb_compare_term =
+  Term.(const deb_compare_cmd $ ver_arg 0 "V1" $ ver_arg 1 "V2" $ const ())
+
+let deb_compare_info =
+  Cmd.info "deb-compare" ~doc:"Compare two Debian version strings (prints lt/eq/gt)"
+
 let () =
   let cmds =
     [
@@ -283,6 +334,8 @@ let () =
       Cmd.v reduce_info reduce_term;
       Cmd.v check_info check_term;
       Cmd.v solve_info solve_term;
+      Cmd.v debian_info debian_term;
+      Cmd.v deb_compare_info deb_compare_term;
     ]
   in
   let cmd = Cmd.group default_info cmds in

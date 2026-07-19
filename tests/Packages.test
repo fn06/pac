@@ -1,0 +1,61 @@
+Package: web-app
+Version: 2.0-1
+Depends: libhttp (>= 1.2), tls-provider, mail-transport-agent
+Description: toy application exercising versioned, virtual, and provided deps
+
+Package: web-app
+Version: 1.0-1
+Depends: libhttp (>= 1.0)
+
+Package: libhttp
+Version: 1.3-2
+
+Package: libhttp
+Version: 1.2-1
+
+Package: libhttp
+Version: 1.0-1
+
+Package: gnutls-shim
+Version: 3.7-1
+Provides: tls-provider (= 1.0)
+
+Package: openssl-shim
+Version: 3.0-4
+Provides: tls-provider (= 2.0)
+
+Package: postfix
+Version: 3.7-1
+Provides: mail-transport-agent
+Conflicts: mail-transport-agent
+
+Package: exim4
+Version: 4.96-1
+Provides: mail-transport-agent
+Conflicts: mail-transport-agent
+
+Package: editor-user
+Version: 1.0
+Depends: nano | vim | ed
+
+Package: nano
+Version: 7.2-1
+
+Package: vim
+Version: 9.0-1
+
+Package: ed
+Version: 1.19-1
+
+Package: legacy-app
+Version: 1.0
+Depends: libhttp (<< 1.2)
+Breaks: web-app (>= 2.0)
+
+Package: needs-new-tls
+Version: 1.0
+Depends: tls-provider (>= 2.0)
+
+Package: nano-hater
+Version: 1.0
+Conflicts: nano

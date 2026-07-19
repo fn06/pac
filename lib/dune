@@ -6,4 +6,4 @@
 (library
  (name pac)
  (libraries pubgrub)
- (modules ast lexer parser core concurrent import))
+ (modules ast lexer parser core concurrent import deb_version deb_packages debian))
